@@ -16,7 +16,7 @@ def read_fastq(fastq):
     seqDict = {}
     with open(fastq) as infile:
         while True:
-            name = infile.readline().strip().lstrip('@').split(' ')[0]
+            name = infile.readline().strip().lstrip('@')
             seq = infile.readline().strip()
             sep = infile.readline().strip()
             qual = infile.readline().strip()

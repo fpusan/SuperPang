@@ -48,7 +48,15 @@ def iterate(infastq, paf, outfastq, corrected_previously, identity_threshold, mi
     
     seqOrderOriginal = []
     seqs = read_fastq(infastq)
+    minimusNameConversion = {}
+        
     seqOrderOriginal = list(seqs.keys()) # trust that dict remembers insertion order
+
+    for name in seqOrderOriginal: # since minimus2 removes everything after the first space
+        newName = name.split(' ')[0]
+        assert newName not in minimusNameConversion # make sure that names are still different. If not, kill ourselves and blame society
+        minimusNameConversion[newName] = name
+
             
     sortedSeqs = list(sorted(seqs, key = lambda a: len(seqs[a]), reverse = True))
 
@@ -60,6 +68,7 @@ def iterate(infastq, paf, outfastq, corrected_previously, identity_threshold, mi
         query, queryLen, queryStart, queryEnd, isRC, target, targetLen, targetStart, targetEnd, matches, alignLen, qual, *_, cigar = line.strip().split('\t')
         if query == target:
             continue
+        query, target = minimusNameConversion[query], minimusNameConversion[target]
         queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual = map(int, [queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual])
         isRC = isRC == '-'
         cigar = cigar.replace('cg:Z:','')

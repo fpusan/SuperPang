@@ -1,9 +1,9 @@
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from itertools import combinations
 
 import numpy as np
 
-from lib.utils import read_fasta, write_fasta, reverse_complement, print_time
+from lib.utils import read_fasta, reverse_complement, print_time
 
 import graph_tool as gt
 from graph_tool.all import Graph
@@ -12,13 +12,12 @@ from graph_tool.all import Graph
 
 ### see if we can put GS.clear_filters() inside the set filters method, instead of having a lot of them throughout the code
 
+
 class Assembler:
 ##    @profile
-    def __init__(self, fasta, ksize, minlen, mincov, out_fasta = '/home/fer/test.fasta'):
+    def __init__(self, fasta, ksize):
 
         self.ksize = ksize
-        confRadius = ksize + 1000
-        out_fastg = out_fasta.rsplit('.',1)[0] + '.fastg'        
 
         seqDict = read_fasta(fasta)
        
@@ -27,19 +26,16 @@ class Assembler:
         self.edgeAbund = defaultdict(int)
         self.includedSeqs = 0
         self.kmer2vertex = {}
+        self.vertexCov = defaultdict(int)
         self.seqPaths = {} # name: pathSet
-        self.addedEdges = set()
+        addedEdges = set()
         totalSize = sum(len(seq) for seq in seqDict.values())
         elapsedSize = 0
         lastSize = 0
         rcKmers = {}
-
-        assembly_nodes = {}
-        assembly_edges = {}
-
+        
         ### Get kmers from sequences and create DBG
-        G = Graph()
-        G.set_fast_edge_removal(True)
+        self.G = Graph()
         for name, seq in seqDict.items():
             elapsedSize += len(seq)
             if len(seq) <= self.ksize:
@@ -53,29 +49,31 @@ class Assembler:
                     if k not in rcKmers:
                         rcKmers[k] = rk
                         rcKmers[rk] = k
-                for i, k in enumerate(kmers):
+                for k in kmers:
                     if k not in self.kmer2vertex:
-                        self.kmer2vertex[k] = int(G.add_vertex())
+                        self.kmer2vertex[k] = int(self.G.add_vertex())
                         self.kmer2vertex[rcKmers[k]] = self.kmer2vertex[k]
+                    self.vertexCov[self.kmer2vertex[k]] += 1
+                    
 
-                self.seqPaths[seq] = set(np.array([self.kmer2vertex[kmer] for kmer in kmers], dtype=np.uint32))
+                self.seqPaths[name] = set(np.array([self.kmer2vertex[kmer] for kmer in kmers], dtype=np.uint32))
 
                 for i in range(len(kmers)-1):
                     k1, k2 = kmers[i],kmers[i+1]
                     v1, v2 = self.kmer2vertex[k1], self.kmer2vertex[k2]
                     edge = (v1, v2)
-                    if edge not in self.addedEdges: # Igual preferimos añadir el edge varias veces para contar el coverage?
-                        G.add_edge(v1, v2) # O igual preferimos dejarlo undirected?
-                        G.add_edge(v2, v1)
-                        self.addedEdges.add( (v1, v2) )
-                        self.addedEdges.add( (v2, v1) )
+                    if edge not in addedEdges:
+                        self.G.add_edge(v1, v2)
+                        self.G.add_edge(v2, v1)
+                        addedEdges.add( (v1, v2) )
+                        addedEdges.add( (v2, v1) )
                 if elapsedSize - lastSize > totalSize/100:
-                    print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {G.num_vertices()} vertices, {G.num_edges()} edges         ', end = '\r')
+                    print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ', end = '\r')
                     lastSize = elapsedSize
                     
-        G.shrink_to_fit()
+        self.G.shrink_to_fit()
         del(seqDict)
-        print_time(f'\t100% bases added, {G.num_vertices()} vertices, {G.num_edges()} edges         ')
+        print_time(f'\t100% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ')
         
         ### Each kmer maps to one vertex, each vertex maps to two kmers
         self.vertex2kmers = defaultdict(list)
@@ -84,15 +82,23 @@ class Assembler:
         for v, kmers in self.vertex2kmers.items():
             assert len(kmers) == 2
         
-        ###Link each vertex to the original sequence in which it appears
-        vertex2names = defaultdict(set)
+        ### Link each vertex to the original sequence in which it appears
+        self.vertex2origins = defaultdict(set)
         for name, path in self.seqPaths.items():
             for v in path:
-                vertex2names[v].add(name)
+                self.vertex2origins[v].add(name)
+
+
+    def run(self, minlen, mincov):
+        ### Start assembly
+        Contig = namedtuple('Contig', ['scaffold', 'i', 'seq', 'cov', 'origins', 'successors'])
+        contigs = {}
+        addedPaths = set()
+        
 
         ### Identify connected components
         print_time('Identifying connected components')
-        vertex2comp = {v: c for v, c in enumerate(gt.topology.label_components(G, directed = False)[0])}
+        vertex2comp = {v: c for v, c in enumerate(gt.topology.label_components(self.G, directed = False)[0])}
         comp2vertices = defaultdict(set)
         currentScaffold = 0
         for v, c in vertex2comp.items():
@@ -107,7 +113,7 @@ class Assembler:
             path_limits = defaultdict(list)
             inits = set()
             for v in vs:
-                if len(set(G.get_all_neighbors(v)) - {v}) != 2: # -{v} to avoid self loops being init points
+                if len(set(self.G.get_all_neighbors(v)) - {v}) != 2: # -{v} to avoid self loops being init points
                     inits.add(v)
 
             # Break cycle if required
@@ -115,9 +121,9 @@ class Assembler:
             ignoreEdge = set()
             if not inits:
                 #is this a cycle?
-                if min([len(set(G.get_all_neighbors(v))) for v in vs]) == 2: # no sources or sinks
+                if min([len(set(self.G.get_all_neighbors(v))) for v in vs]) == 2: # no sources or sinks
                     for v in vs:
-                        neighbors = G.get_all_neighbors(v)
+                        neighbors = self.G.get_all_neighbors(v)
                         if len(set(neighbors)) == 2: # find the first extender edge, and break there
                             inits.add(v)
                             inits.add(neighbors[0])
@@ -126,11 +132,11 @@ class Assembler:
                             break
                    
             for j, ini in enumerate(inits):
-                for n in set(G.get_all_neighbors(ini)):
+                for n in set(self.G.get_all_neighbors(ini)):
                     p = [ini, n]
                     last = ini
                     while True:
-                        s = set(G.get_all_neighbors(p[-1])) - {last, p[-1]} #p[-1] to avoid stopping at self loops
+                        s = set(self.G.get_all_neighbors(p[-1])) - {last, p[-1]} #p[-1] to avoid stopping at self loops
                         if len(s) != 1:
                             break
                         last = p[-1]
@@ -167,7 +173,7 @@ class Assembler:
             sStart = {}
             sEnd = {}
             for path, seq in path2seq.items():
-                start, end = seq[:ksize], seq[-ksize:]
+                start, end = seq[:self.ksize], seq[-self.ksize:]
                 start2paths[start].add(path)
                 sStart[path] = start
                 sEnd[path] = end
@@ -179,7 +185,7 @@ class Assembler:
                 assert p not in path2vertexGS
                 path2vertexGS[p] = int(GS.add_vertex())
             for p1 in paths:
-                confSeqs = vertex2names[p1[-1]]
+                confSeqs = self.vertex2origins[p1[-1]]
                 for p2 in start2paths[sEnd[p1]]:
                     cp = set(p1+p2[1:])
                     for name in confSeqs:
@@ -328,7 +334,7 @@ class Assembler:
                 for p in paths:
                     seq = path2seq[p]
                     if GS.get_out_neighbors(path2vertexGS[p]).shape[0]:
-                        seq = seq[:-ksize] # trim the overlap unless this is a terminal node
+                        seq = seq[:-self.ksize] # trim the overlap unless this is a terminal node
                     scaffoldLen += len(seq)
                 msg += f', {scaffoldLen} bases'
                 if minlen and scaffoldLen < minlen:
@@ -337,7 +343,7 @@ class Assembler:
                     continue
 
                 # Compute scaffold coverage
-                scaffoldCov = np.mean([len(vertex2names[v]) for p in paths for v in p])
+                scaffoldCov = np.mean([self.vertexCov[v] for p in paths for v in p])
                 msg += f', cov {round(scaffoldCov, 2)}'
                 if mincov and scaffoldCov < mincov:
                     msg += ' (< mincov, IGNORED)'
@@ -355,7 +361,7 @@ class Assembler:
                 for (start, end), ps in path_limits.items():
                     minpathlen = min(len(p) for p in ps)
                     if len(ps) > 1: # more than one path with similar start and end
-                        if minpathlen <= 2*ksize-1: # fast way if mismatches are separated enough
+                        if minpathlen <= 2*self.ksize-1: # fast way if mismatches are separated enough
                             bubble_paths.update(ps[1:])
                             m1 += len(ps)-1
                 paths = [p for p in paths if p not in bubble_paths]
@@ -397,22 +403,25 @@ class Assembler:
                     end = start
                     succs = successors[start]
                     succ = succs[0] if succs else None
+                    extended = False
                     while succ in joinExtenders:
+                        extended = True
                         visited.add(succ)
                         new_path += succ[1:]
                         end = succ
                         succs = successors[succ]
                         succ = succs[0] if succs else None
                     paths.append(new_path)
-                    sStart[new_path] = sStart[start]
-                    sEnd[new_path] = sEnd[end]
-                    path2seq[new_path] = self.reconstruct_sequence(new_path)
-                    predecessors[new_path] = predecessors[start]
-                    for pred in predecessors[new_path]:
-                        successors[pred].append(new_path)
-                    successors[new_path] = successors[end]
-                    for succ in successors[new_path]:
-                        predecessors[succ].append(new_path)
+                    if extended:
+                        sStart[new_path] = sStart[start]
+                        sEnd[new_path] = sEnd[end]
+                        path2seq[new_path] = self.reconstruct_sequence(new_path)
+                        predecessors[new_path] = predecessors[start]
+                        for pred in predecessors[new_path]:
+                            successors[pred].append(new_path)
+                        successors[new_path] = successors[end]
+                        for succ in successors[new_path]:
+                            predecessors[succ].append(new_path)
 
                 assert visited == joinExtenders
 
@@ -436,33 +445,35 @@ class Assembler:
 
                 msg += f', found {len(paths)} paths'
 
-                # Get path coverages
-                path2cov = {p: np.mean([len(vertex2names[v]) for v in p]) for p in paths}
-                
-                # Write assembly graph edges
-                path2edgeName = {}
-                for i, p in enumerate(paths):
-                    path2edgeName[p] = f'EDGE_Sc{scaffold}-{i}_length_{len(path2seq[p])}_cov_{path2cov[p]}'
-                
-                for p in paths:
-                    succs = ','.join(path2edgeName[s] for s in successors[p])
-                    succs = f':{succs}' if succs else ''
-                    assembly_edges[f'{path2edgeName[p]}{succs};'] = path2seq[p]
-                # Write contigs
-                for i, p  in enumerate(paths):
-                    cov = 1
-                    seq = path2seq[p]
-                    if successors[p]: # trim the overlap unless this is a terminal node
-                        seq = seq[:-ksize]
-                    assembly_nodes[f'NODE_Sc{scaffold}-{i}_length_{len(seq)}_cov_{path2cov[p]}'] = seq
 
+                # Update global results
+                    
+                path2id = {p: (scaffold, i) for i, p in enumerate(paths)}
+                
+
+                for p in paths:
+                    assert p not in addedPaths
+                    id_ = path2id[p]
+                    # Don't take into account overlaps with other paths for mean cov calculation and origin reporting
+                    vertices = p # copy it
+                    if len(p) > 2: # very small paths may end up with no valid vertices
+                        if predecessors[p]: 
+                            vertices = vertices[1:]
+                        if successors[p]:
+                            vertices = vertices[:-1]
+                    # Go on
+                    contigs[id_] = Contig(scaffold    = id_[0],
+                                          i           = id_[1],
+                                          seq        =  path2seq[p],
+                                          cov        = np.mean([self.vertexCov[v] for v in vertices]),
+                                          origins    = {ori for v in vertices for ori in self.vertex2origins[v]},
+                                          successors = [path2id[succ] for succ in successors[p]])
+                    addedPaths.add(p)
                 print_time(msg)
 
-            
-                
-        ### Output
-        write_fasta(assembly_nodes, out_fasta)
-        write_fasta(assembly_edges, out_fastg)
+                    
+        ### Finished!
+        return contigs
 
 
     @staticmethod
@@ -492,8 +503,7 @@ class Assembler:
             ks = self.vertex2kmers[v]
             toadd = []
             for k in ks:
-                if k[:-1] == kmers[-1][1:]: #and k in self.kmerFollow[kmers[-1]]:
-##                    assert k in self.kmerFollow[kmers[-1]] # the check for self.kmerFollow[kmers[-1]] was commented as it was always true if k[:-1] == kmers[1][1:]
+                if k[:-1] == kmers[-1][1:]:
                     toadd.append(k)
             assert len(toadd) <= 2
             if not toadd:
