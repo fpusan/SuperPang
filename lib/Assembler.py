@@ -28,14 +28,14 @@ class Assembler:
         self.kmer2vertex = {}
         self.vertexCov = defaultdict(int)
         self.seqPaths = {} # name: pathSet
-        addedEdges = set()
         totalSize = sum(len(seq) for seq in seqDict.values())
         elapsedSize = 0
         lastSize = 0
-        rcKmers = {}
+        self.vertex2kmers = {}
+        self.vertex2origins = defaultdict(set)
         
         ### Get kmers from sequences and create DBG
-        self.G = Graph()
+        edges = set()
         for name, seq in seqDict.items():
             elapsedSize += len(seq)
             if len(seq) <= self.ksize:
@@ -46,14 +46,17 @@ class Assembler:
                 kmers = self.seq2kmers(seq)
                 revkmers = self.seq2kmers(rcSeq)
                 for k, rk in zip(kmers, revkmers[::-1]):
-                    if k not in rcKmers:
-                        rcKmers[k] = rk
-                        rcKmers[rk] = k
-                for k in kmers:
                     if k not in self.kmer2vertex:
-                        self.kmer2vertex[k] = int(self.G.add_vertex())
-                        self.kmer2vertex[rcKmers[k]] = self.kmer2vertex[k]
-                    self.vertexCov[self.kmer2vertex[k]] += 1
+                        v = len(self.vertex2kmers) #currentVertex
+                        self.kmer2vertex[k] = v
+                        self.kmer2vertex[rk] = v
+                        self.vertex2kmers[v] = (k,rk) 
+                    else:
+                        v = self.kmer2vertex[k]
+                    # Track vertex coverage
+                    self.vertexCov[v] += 1
+                    # Link each vertex to the original sequence in which it appears
+                    self.vertex2origins[v].add(name)
                     
 
                 self.seqPaths[name] = set(np.array([self.kmer2vertex[kmer] for kmer in kmers], dtype=np.uint32))
@@ -61,34 +64,32 @@ class Assembler:
                 for i in range(len(kmers)-1):
                     k1, k2 = kmers[i],kmers[i+1]
                     v1, v2 = self.kmer2vertex[k1], self.kmer2vertex[k2]
-                    edge = (v1, v2)
-                    if edge not in addedEdges:
-                        self.G.add_edge(v1, v2)
-                        self.G.add_edge(v2, v1)
-                        addedEdges.add( (v1, v2) )
-                        addedEdges.add( (v2, v1) )
+                    edges.add( (v1, v2) )
+                    edges.add( (v2, v1) )
                 if elapsedSize - lastSize > totalSize/100:
-                    print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ', end = '\r')
+                    print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {len(self.vertex2kmers)} vertices, {len(edges)} edges         ', end = '\r')
                     lastSize = elapsedSize
-                    
-        self.G.shrink_to_fit()
+
+        self.G = Graph()
+        self.G.add_edge_list(edges)   
         del(seqDict)
         print_time(f'\t100% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ')
         
-        ### Each kmer maps to one vertex, each vertex maps to two kmers
-        self.vertex2kmers = defaultdict(list)
-        for k, v in self.kmer2vertex.items():
-            self.vertex2kmers[v].append(k)
-        for v, kmers in self.vertex2kmers.items():
-            assert len(kmers) == 2
+##        ### Each kmer maps to one vertex, each vertex maps to two kmers
+##        self.vertex2kmers = defaultdict(list)
+##        for k, v in self.kmer2vertex.items():
+##            self.vertex2kmers[v].append(k)
+##        for v, kmers in self.vertex2kmers.items():
+##            assert len(kmers) == 2
         
-        ### Link each vertex to the original sequence in which it appears
-        self.vertex2origins = defaultdict(set)
-        for name, path in self.seqPaths.items():
-            for v in path:
-                self.vertex2origins[v].add(name)
+        
+##        self.vertex2origins = defaultdict(set)
+##        for name, path in self.seqPaths.items():
+##            for v in path:
+##                self.vertex2origins[v].add(name)
 
 
+##    @profile
     def run(self, minlen, mincov):
         ### Start assembly
         Contig = namedtuple('Contig', ['scaffold', 'i', 'seq', 'cov', 'origins', 'successors'])
@@ -266,10 +267,15 @@ class Assembler:
                 # Identify RC components
                 first = True
                 assert len(subcomps1) == len(subcomps2)
+                
+                subcomp2vertex1 = {scS1: {v for vS in svS1 for v in vertex2path[vS]} for scS1, svS1 in subcomps1.items()} # so we don't have to compute this inside the loop
+                subcomp2vertex2 = {scS2: {v for vS in svS2 for v in vertex2path[vS]} for scS2, svS2 in subcomps2.items()}
+
+                        
                 for scS1, svS1 in subcomps1.items():
-                    v1 = {v for vS in svS1 for v in vertex2path[vS]}
+                    v1 = subcomp2vertex1[scS1]
                     for scS2, svS2 in subcomps2.items():
-                        v2 = {v for vS in svS2 for v in vertex2path[vS]}
+                        v2 = subcomp2vertex2[scS2]
                         if v1 == v2:
                             i1 = cS if first else len(comp2vertexGS) # recycle the previous component index for cS1
                             comp2vertexGS[i1] = svS1
