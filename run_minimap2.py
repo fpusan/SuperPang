@@ -248,11 +248,11 @@ def parse_args():
     parser = ArgumentParser(description='Correct a set of sequences using mhap')
     parser.add_argument('-f', '--fasta', type = str, required = True,
                         help = 'Input fasta')
-    parser.add_argument('-i', '--identity_threshold', type = float, default = 0.8,
+    parser.add_argument('-i', '--identity_threshold', type = float, default = 0.7,
                         help = 'Identity threshold (fraction) to initiate correction with minimap2')
-    parser.add_argument('-m', '--mismatch-size-threshold', type = int, default = 10,
+    parser.add_argument('-m', '--mismatch-size-threshold', type = int, default = 100,
                         help = 'Maximum contiguous mismatch size that will be corrected')
-    parser.add_argument('-g', '--indel-size-threshold', type = int, default = 10,
+    parser.add_argument('-g', '--indel-size-threshold', type = int, default = 100,
                         help = 'Maximum contiguous indel size that will be corrected')
     parser.add_argument('-r', '--correction-repeats', type = int, default = 1,
                         help = 'Maximum iterations for sequence correction')

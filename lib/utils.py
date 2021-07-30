@@ -2,13 +2,25 @@ from datetime import datetime
 import resource
 
 
-def read_fasta(fasta):
+def read_fasta(fasta, Ns = 'ignore'):
+    assert Ns in ('ignore', 'split')
     seqDict = {}
     for seq in open(fasta).read().strip().lstrip('>').split('>'):
         name, seq = seq.split('\n',1)
-        seq = seq.upper().replace('\n','').replace('.','').replace('-','').replace('N','')
+        seq = seq.upper().replace('\n','').replace('.','').replace('-','')
+        s = 0
         assert name not in seqDict
-        seqDict[name] = seq
+        if Ns == 'ignore':
+            seqDict[name] = seq
+        else:
+            if 'N' not in seq:
+                seqDict[name] = seq
+            else:
+                i = 0
+                for seq in seq.split('N'):
+                    if seq:
+                        seqDict[f'{name}_Nsplit_{i}'] = seq
+                        i += 1
     return seqDict
 
 

@@ -1,6 +1,8 @@
 from collections import defaultdict, namedtuple
 from itertools import combinations
 
+from Levenshtein import distance
+
 import numpy as np
 
 from lib.utils import read_fasta, reverse_complement, print_time
@@ -19,7 +21,7 @@ class Assembler:
 
         self.ksize = ksize
 
-        seqDict = read_fasta(fasta)
+        seqDict = read_fasta(fasta, Ns = 'split')
        
         print_time(f'Creating DBG from {len(seqDict)} sequences')
         
@@ -50,7 +52,7 @@ class Assembler:
                         v = len(self.vertex2kmers) #currentVertex
                         self.kmer2vertex[k] = v
                         self.kmer2vertex[rk] = v
-                        self.vertex2kmers[v] = (k,rk) 
+                        self.vertex2kmers[v] = (k,rk)
                     else:
                         v = self.kmer2vertex[k]
                     # Track vertex coverage
@@ -71,32 +73,19 @@ class Assembler:
                     lastSize = elapsedSize
 
         self.G = Graph()
-        self.G.add_edge_list(edges)   
+        self.G.add_edge_list(edges)
         del(seqDict)
+        del(edges)
         print_time(f'\t100% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ')
-        
-##        ### Each kmer maps to one vertex, each vertex maps to two kmers
-##        self.vertex2kmers = defaultdict(list)
-##        for k, v in self.kmer2vertex.items():
-##            self.vertex2kmers[v].append(k)
-##        for v, kmers in self.vertex2kmers.items():
-##            assert len(kmers) == 2
-        
-        
-##        self.vertex2origins = defaultdict(set)
-##        for name, path in self.seqPaths.items():
-##            for v in path:
-##                self.vertex2origins[v].add(name)
 
 
 ##    @profile
-    def run(self, minlen, mincov):
+    def run(self, minlen, mincov, genome_assignment_threshold):
         ### Start assembly
-        Contig = namedtuple('Contig', ['scaffold', 'i', 'seq', 'cov', 'origins', 'successors'])
+        Contig = namedtuple('Contig', ['scaffold', 'i', 'seq', 'tseq', 'cov', 'origins', 'successors'])
         contigs = {}
         addedPaths = set()
         
-
         ### Identify connected components
         print_time('Identifying connected components')
         vertex2comp = {v: c for v, c in enumerate(gt.topology.label_components(self.G, directed = False)[0])}
@@ -226,6 +215,7 @@ class Assembler:
                 assert len(psets) == len(comp2vertexGS[cS]) / 2 # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
                 vS2rc = {}
                 for vS1, vS2 in psets.values():
+##                    assert vertex2path[vS1] == vertex2path[vS2][::-1]
                     vS2rc[vS1] = vS2
                     vS2rc[vS2] = vS1
                 self.set_vertex_filter(GS, comp2vertexGS[cS])
@@ -233,18 +223,32 @@ class Assembler:
                 assert(len(set(gt.topology.label_components(GS, directed = False)[0]))) == 1
             
                 # Separate fwd and rev
+                sources = {int(vS) for vS in GS.vertices() if not GS.get_in_neighbors(vS).shape[0] }
+                sinks   = {int(vS) for vS in GS.vertices() if not GS.get_out_neighbors(vS).shape[0]}
+
+                dists = {}
+
+                for source in sources:
+                    assert vS2rc[source] in sinks
+                    if source not in sinks:
+                        d = gt.topology.shortest_distance(GS, source, vS2rc[source], max_dist = len(comp2vertexGS[cS]) + 1) # what if there are two paths connecting source and target? Is the shortest distance still ok?
+                        dists[source] = d
+
+                sources = list(sorted(sources, key = lambda source: dists[source], reverse = True))
+
                 vSs1 = set()
                 vSs2 = set()
                 added = set()
-
-                for e in gt.search.bfs_iterator(GS): # is BFS the best choice? I need all fwd vertices to be visited before all rev vertices,
-                    for vS in (e.source(), e.target()): # but it's hard to be sure without a DAG/ topoSort
-                        if vS not in added:             # breaking cycles to get a DAG was too expensive
-                            rc = vS2rc[vS]
-                            added.add(vS)
-                            added.add(rc)
-                            vSs1.add(vS)
-                            vSs2.add(rc)                   
+                for source in sources:
+                    for e in gt.search.bfs_iterator(GS, source): # is BFS the best choice? I need all fwd vertices to be visited before all rev vertices,
+                        for vS in (e.source(), e.target()):      # but it's hard to be sure without a DAG/ topoSort
+                            if vS not in added:                  # breaking cycles to get a DAG was too expensive
+                                rc = vS2rc[vS]                   # we try to fix this by starting from the source with a longest distance to its reverse complement
+                                added.add(vS)
+                                added.add(rc)
+                                vSs1.add(vS)
+                                vSs2.add(rc)
+                assert added == comp2vertexGS[cS]
 
                 # Check that fwd and rev have the same vertices
                 v1 = {v for vS in vSs1 for v in vertex2path[vS]}
@@ -255,23 +259,88 @@ class Assembler:
                 # Identify subcomponents in vS1
                 self.set_vertex_filter(GS, vSs1)
                 subcomps1 = defaultdict(set)
-                for n,c in zip(GS.vertices(), gt.topology.label_components(GS, directed = False)[0]):
-                    subcomps1[c].add(n)
+                for vS,c in zip(GS.vertices(), gt.topology.label_components(GS, directed = False)[0]):
+                    subcomps1[c].add(vS)
                 GS.clear_filters()
                 # Identify subcomponents in vS2
                 self.set_vertex_filter(GS, vSs2)
                 subcomps2 = defaultdict(set)
-                for n,c in zip(GS.vertices(), gt.topology.label_components(GS, directed = False)[0]):
-                    subcomps2[c].add(n)
+                for vS,c in zip(GS.vertices(), gt.topology.label_components(GS, directed = False)[0]):
+                    subcomps2[c].add(vS)
                 GS.clear_filters()
                 # Identify RC components
-                first = True
                 assert len(subcomps1) == len(subcomps2)
                 
                 subcomp2vertex1 = {scS1: {v for vS in svS1 for v in vertex2path[vS]} for scS1, svS1 in subcomps1.items()} # so we don't have to compute this inside the loop
                 subcomp2vertex2 = {scS2: {v for vS in svS2 for v in vertex2path[vS]} for scS2, svS2 in subcomps2.items()}
 
-                        
+
+                # Try to merge into one fwd and one rev subcomp
+                # In some cases the fwd and rev sequences can be actually be present in the same genome
+                # So we identify the largest fwd subcomponent, throw in the rest of components in fwd and rev, and hope that they become connected when everything is together
+                largestSubcomp = list(sorted(subcomps1, key = lambda scS: len(subcomps1[scS]), reverse = True))[0]
+                combined = subcomps1[largestSubcomp]
+                for scS in subcomps1:
+                    if scS != largestSubcomp:
+                        fwd = subcomps1[scS]
+                        rev = {vS2rc[vS] for vS in fwd}
+                        combined = combined | fwd | rev
+                
+                subcomps1_corrected = defaultdict(set)
+                subcomps2_corrected = defaultdict(set)
+                self.set_vertex_filter(GS, combined)
+                for vS, c  in zip(GS.vertices(), gt.topology.label_components(GS, directed = False)[0]):
+                    subcomps1_corrected[c].add(vS)
+                    subcomps2_corrected[c].add(vS2rc[vS])
+##                print(len(subcomps1), len(subcomps1_corrected))# this has reduced the number of subcomponents
+##                print(len(subcomps2), len(subcomps2_corrected))# this has reduced the number of subcomponents
+
+
+                # The lines above may make a rev subcomponent may end up being contained in a fwd component
+                # E.g. let us have initially three components A, B, C (fwd) and A', B', C' (rev)
+                # We correct and it turns out that B' got inside A so by the code above we end up with AB', B, C (fwd) and A'B, B', C' (rev)
+                # So we want to remove B from fwd and B' from rev, so that we don't end up having duplicate paths
+                bad1 = set()
+                bad2 = set()
+                for scS1, svS1 in subcomps1_corrected.items():
+                    for scS2, svS2 in subcomps2_corrected.items():
+                        if   svS2.issubset(svS1) and not svS1.issubset(svS2):
+                            bad2.add(scS2)
+                        elif svS1.issubset(svS2) and not svS2.issubset(svS1):
+                            bad1.add(scS1)
+                subcomps1_corrected = {c: vSs for c, vSs in subcomps1_corrected.items() if c not in bad1}
+                subcomps2_corrected = {c: vSs for c, vSs in subcomps2_corrected.items() if c not in bad2}
+
+                # Keep going
+                subcomps1 = subcomps1_corrected
+                subcomps2 = subcomps2_corrected
+
+                subcomp2vertex1 = {scS1: {v for vS in svS1 for v in vertex2path[vS]} for scS1, svS1 in subcomps1.items()} # so we don't have to compute this inside the loop
+                subcomp2vertex2 = {scS2: {v for vS in svS2 for v in vertex2path[vS]} for scS2, svS2 in subcomps2.items()}
+
+                # Assertions
+                v1 = set.union(*list(subcomp2vertex1.values()))
+                v2 = set.union(*list(subcomp2vertex2.values()))
+                assert v1 == v2
+
+                for svS1, svS2 in combinations(subcomps1.values(), 2):
+                    assert not svS1 & svS2 # if they are not RC they should not share any paths
+                for svS1, svS2 in combinations(subcomps2.values(), 2):
+                    assert not svS1 & svS2 # if they are not RC they should not share any paths
+
+                
+                for scS1, svS1 in subcomps1.items():
+                    for cS2, vSs in comp2vertexGS.items(): # they should not share any paths with other components in the sequence graph either
+                        if cS2 != cS:
+                            assert not vSs & svS1
+                for scS2, svS2 in subcomps1.items():
+                    for cS2, vSs in comp2vertexGS.items(): # they should not share any paths with other components in the sequence graph either
+                        if cS2 != cS:
+                            assert not vSs & svS2
+
+                GS.clear_filters()                
+
+                first = True
                 for scS1, svS1 in subcomps1.items():
                     v1 = subcomp2vertex1[scS1]
                     for scS2, svS2 in subcomps2.items():
@@ -300,8 +369,8 @@ class Assembler:
                     ATGs[cS] += path2seq[vertex2path[vS]].count('ATG')
             added = set()
 
-            compS2paths = defaultdict(set)
             
+            compS2paths = defaultdict(set)
             for cS1, cS2 in rcComps.items():
                 if cS1 in added:
                     continue
@@ -314,17 +383,11 @@ class Assembler:
                 added.add(cS2)
                 currentScaffold += 1
 
-##            # Check that the  non-init vertices appear only once
-##            vcov = defaultdict(int)
-##            for p in paths:
-##                for v in p:
-##                    vcov[v] += 1
-##            for v, cov in vcov.items(): # THIS ASSERTION FAILS IN SOME CASES IN WHICH THE FWD AND REV VERSION OF THE KMER STILL ARE IN THE SAME SEQUENCE
-##                if v not in inits:      # CD-HIT SHOULD TAKE CARE OF THE PROBLEM AFTER THIS
-##                    assert cov == 1
-            
             # Check that we included all the input vertices
             assert vs == {v for p in paths for v in p}
+            # Check that no paths appear in two different scaffolds
+            for cs1, cs2 in combinations(compS2paths, 2):
+                assert not compS2paths[cs1] & compS2paths[cs2]
 
             ### Process each scaffold in the sequence graph
             for scaffold, paths in compS2paths.items():
@@ -364,12 +427,22 @@ class Assembler:
                 for p in paths:
                     path_limits[(p[0], p[-1])].append(p)    
                 m1 = 0
-                for (start, end), ps in path_limits.items():
-                    minpathlen = min(len(p) for p in ps)
-                    if len(ps) > 1: # more than one path with similar start and end
-                        if minpathlen <= 2*self.ksize-1: # fast way if mismatches are separated enough
-                            bubble_paths.update(ps[1:])
-                            m1 += len(ps)-1
+##                for (start, end), ps in path_limits.items():
+##                    minpathlen = min(len(p) for p in ps)
+##                    if len(ps) > 1: # more than one path with similar start and end
+##                        if minpathlen <= 2*self.ksize-1: # fast way if mismatches are separated enough
+##                            ps = sorted(ps, key = lambda x: len(x), reverse = True)
+##                            good_paths = {ps[0]}
+##                            for p2 in ps[1:]:
+##                                gps = set()
+##                                for p1 in good_paths:
+##                                    if distance(path2seq[p1], path2seq[p2]) / len(p2) < 0.25:
+##                                        bubble_paths.add(p2)
+##                                        m1 += 1
+##                                    else:
+##                                        gps.add(p2)
+##                                good_paths.update(gps)
+                                        
                 paths = [p for p in paths if p not in bubble_paths]
                 msg += f', removed {m1} bubbles'
                 print_time(msg, end = '\r')
@@ -379,100 +452,164 @@ class Assembler:
                 
 
                 # Join contiguous unbranching paths (can happen after solving the fwd component and popping bubbles
-                predecessors = defaultdict(list)
-                successors = defaultdict(list)
+                predecessors = defaultdict(set)
+                successors = defaultdict(set)
                 for p1 in paths:
                     for vS2 in GS.get_out_neighbors(path2vertexGS[p1]):
                         if vertex2path[vS2] not in bubble_paths:
-                            successors[p1].append(vertex2path[vS2])
+                            successors[p1].add(vertex2path[vS2])
                     for vS2 in GS.get_in_neighbors(path2vertexGS[p1]):
                         if vertex2path[vS2] not in bubble_paths:
-                            predecessors[p1].append(vertex2path[vS2])
-
-                
-                extenders = {p for p in paths if len(successors[p]) <= 1 and (successors[p] or predecessors[p])}
-                extenders = extenders | {p for p in paths if len(predecessors[p]) == 1} ### added later, consider removing this line if we start failing assertions
-                joinStarters =  {p for p in extenders if len(predecessors[p]) != 1 or len(successors[predecessors[p][0]]) > 1}
-
-                if not joinStarters: # Is this a cycle
-                    if min(len(ps) for ps in predecessors.values()) == 1: # This does not cover the case in which there is a cycle but also a linear component
-                        joinStarters = {list(extenders)[0]}
-                
-                joinExtenders = {p for p in extenders if p not in joinStarters}
-                assert extenders == joinStarters | joinExtenders
-
-                paths = [p for p in paths if p not in joinStarters | joinExtenders] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
-                
-                visited = set()
-                for start in joinStarters:
-                    new_path = start
-                    end = start
-                    succs = successors[start]
-                    succ = succs[0] if succs else None
-                    extended = False
-                    while succ in joinExtenders:
-                        extended = True
-                        visited.add(succ)
-                        new_path += succ[1:]
-                        end = succ
-                        succs = successors[succ]
-                        succ = succs[0] if succs else None
-                    paths.append(new_path)
-                    if extended:
-                        sStart[new_path] = sStart[start]
-                        sEnd[new_path] = sEnd[end]
-                        path2seq[new_path] = self.reconstruct_sequence(new_path)
-                        predecessors[new_path] = predecessors[start]
-                        for pred in predecessors[new_path]:
-                            successors[pred].append(new_path)
-                        successors[new_path] = successors[end]
-                        for succ in successors[new_path]:
-                            predecessors[succ].append(new_path)
-
-                assert visited == joinExtenders
-
-                # Update scaffold graph
-                pathSet = set(paths)
-                for p, preds in predecessors.items():
-                    predecessors[p] = [pred for pred in preds if pred in pathSet]
-                predecessors = defaultdict(list, [(p, preds) for p, preds in predecessors.items() if p in pathSet])
-                for p, succs in successors.items():
-                    successors[p]   = [succ for succ in succs if succ in pathSet]
-                successors   = defaultdict(list, [(p, succs) for p, succs in successors.items()   if p in pathSet])
-
-                    
-                # Check that paths with one predecessor and successor happen only around branching points
-                for p in paths:
-                    if len(predecessors[p])==1 and len(successors[p])==1:
-                        pred = predecessors[p][0]
-                        succ = successors[p][0]
-                        assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
-                        assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
+                            predecessors[p1].add(vertex2path[vS2])
+##
+##                
+##                extenders = {p for p in paths if len(successors[p]) <= 1 and (successors[p] or predecessors[p])}
+##                extenders = extenders | {p for p in paths if len(predecessors[p]) == 1} ### added later, consider removing this line if we start failing assertions
+##                joinStarters =  {p for p in extenders if len(predecessors[p]) != 1 or len(successors[predecessors[p][0]]) > 1}
+##
+##                if not joinStarters: # Is this a cycle
+##                    if min(len(ps) for ps in predecessors.values()) == 1: # This does not cover the case in which there is a cycle but also a linear component
+##                        joinStarters = {list(extenders)[0]}
+##                
+##                joinExtenders = {p for p in extenders if p not in joinStarters}
+##                assert extenders == joinStarters | joinExtenders
+##
+##                paths = [p for p in paths if p not in joinStarters | joinExtenders] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
+##                
+##                visited = set()
+##                for start in joinStarters:
+##                    new_path = start
+##                    end = start
+##                    succs = successors[start]
+##                    succ = list(succs)[0] if succs else None
+##                    extended = False
+##                    while succ in joinExtenders:
+##                        extended = True
+##                        visited.add(succ)
+##                        new_path += succ[1:]
+##                        end = succ
+##                        succs = successors[succ]
+##                        succ = list(succs)[0] if succs else None
+##                    paths.append(new_path)
+##                    if extended:
+##                        sStart[new_path] = sStart[start]
+##                        sEnd[new_path] = sEnd[end]
+##                        path2seq[new_path] = self.reconstruct_sequence(new_path)
+##                        predecessors[new_path] = predecessors[start]
+##                        for pred in predecessors[new_path]:
+##                            successors[pred].append(new_path)
+##                        successors[new_path] = successors[end]
+##                        for succ in successors[new_path]:
+##                            predecessors[succ].append(new_path)
+##
+##                assert visited == joinExtenders
+##
+##                # Update scaffold graph
+##                pathSet = set(paths)
+##                for p, preds in predecessors.items():
+##                    predecessors[p] = [pred for pred in preds if pred in pathSet]
+##                predecessors = defaultdict(list, [(p, preds) for p, preds in predecessors.items() if p in pathSet])
+##                for p, succs in successors.items():
+##                    successors[p]   = [succ for succ in succs if succ in pathSet]
+##                successors   = defaultdict(list, [(p, succs) for p, succs in successors.items()   if p in pathSet])
+##
+##                    
+##                # Check that paths with one predecessor and successor happen only around branching points
+##                for p in paths:
+##                    if len(predecessors[p])==1 and len(successors[p])==1:
+##                        pred = predecessors[p][0]
+##                        succ = successors[p][0]
+##                        assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
+##                        assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
 
                 msg += f', found {len(paths)} paths'
 
+                # By default we'll trim overlaps at 3', but we make exceptions
+                # The idea is to remove also overlaps between to sequences sharing the same predecessor
+                trim_left  = set()
+                keep_right = set()
+                for p in paths:
+                    if len(successors[p]) > 1:
+                        for succ in successors[p]:
+                            if len(succ) > 1:
+                                trim_left.add(succ)
+                        keep_right.add(p)
+                for p in paths:
+                    if not successors[p] or len(p) < 2 or (len(p)<=2 and p in trim_left):
+                        keep_right.add(p)
+                    for succ in successors[p]:
+                        if succ in trim_left:
+                            keep_right.add(p)
+
+                trimmedPaths = []
+                for p in paths:
+                    tp = tuple(p) # copy
+                    if p not in keep_right:
+                        tp = tp[:-1]
+                    if p in trim_left:
+                        tp = tp[1:]
+                    assert tp
+                    trimmedPaths.append(tp)
+
+                vs = {v for p in paths for v in p}
+                vst = {v for p in trimmedPaths for v in p}
+                assert vs == vst
+                
+                trimmedSeqs = []
+                for p in paths:
+                    tseq = path2seq[p]
+                    if p not in keep_right:
+                        tseq = tseq[:-self.ksize]
+                    if p in trim_left:
+                        tseq = tseq[self.ksize:]
+                    trimmedSeqs.append(tseq)
+                
 
                 # Update global results
                     
                 path2id = {p: (scaffold, i) for i, p in enumerate(paths)}
-                
 
-                for p in paths:
+                for p, tp, tseq in zip(paths, trimmedPaths, trimmedSeqs):
                     assert p not in addedPaths
                     id_ = path2id[p]
                     # Don't take into account overlaps with other paths for mean cov calculation and origin reporting
-                    vertices = p # copy it
-                    if len(p) > 2: # very small paths may end up with no valid vertices
-                        if predecessors[p]: 
-                            vertices = vertices[1:]
-                        if successors[p]:
-                            vertices = vertices[:-1]
+                    vertices = tp
+                    ori2cov = defaultdict(int)
+                    for v in vertices:
+                        for ori in self.vertex2origins[v]:
+                            ori2cov[ori] += 1
+                    ori2cov   = {ori: prev/len(vertices) for ori, prev in ori2cov.items()}
+                    goodOris  = {ori for ori, cov in ori2cov.items() if cov >= genome_assignment_threshold}
+##                    if len(goodOris) < len(ori2cov):
+##                        print()
+##                        last = None
+##                        c = 0
+##                        for v in vertices:
+##                            oris = self.vertex2origins[v]
+##                            if not last:
+##                                last = oris
+##                                c += 1
+##                            elif oris != last:
+##                                print(last, c)
+##                                last, c = oris, 1
+##                            else:
+##                                c += 1
+##                        if p in trim_left:
+##                            assert p[0] != tp[0]
+##                        if p not in keep_right:
+##                            assert p[-1] != tp[-1]
+##                        print(last, c)
+##                        print(path2id[p], p in trim_left, p in keep_right)
+####                        breakpoint()
+                    goodOris.add( list(sorted(ori2cov, key = lambda ori: ori2cov[ori], reverse = True))[0] ) # add at least the origin with the highest cov
+                    goodOris = {ori.split('_Nsplit_')[0] for ori in goodOris}
                     # Go on
-                    contigs[id_] = Contig(scaffold    = id_[0],
-                                          i           = id_[1],
-                                          seq        =  path2seq[p],
+                    contigs[id_] = Contig(scaffold   = id_[0],
+                                          i          = id_[1],
+                                          seq        = path2seq[p],
+                                          tseq       = tseq,
                                           cov        = np.mean([self.vertexCov[v] for v in vertices]),
-                                          origins    = {ori for v in vertices for ori in self.vertex2origins[v]},
+                                          origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     addedPaths.add(p)
                 print_time(msg)
