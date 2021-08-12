@@ -1,16 +1,12 @@
 from collections import defaultdict, namedtuple
 from itertools import combinations
 
-from Levenshtein import distance
-
 import numpy as np
 
 from lib.utils import read_fasta, reverse_complement, print_time
 
 import graph_tool as gt
 from graph_tool.all import Graph
-
-### RIGHT NOW WE REMOVE Ns FROM THE SEQUENCES IN read_fasta. What do they mean and what should we do with them?
 
 ### see if we can put GS.clear_filters() inside the set filters method, instead of having a lot of them throughout the code
 
@@ -28,7 +24,6 @@ class Assembler:
         self.edgeAbund = defaultdict(int)
         self.includedSeqs = 0
         self.kmer2vertex = {}
-        self.vertexCov = defaultdict(int)
         self.seqPaths = {} # name: pathSet
         totalSize = sum(len(seq) for seq in seqDict.values())
         elapsedSize = 0
@@ -55,11 +50,8 @@ class Assembler:
                         self.vertex2kmers[v] = (k,rk)
                     else:
                         v = self.kmer2vertex[k]
-                    # Track vertex coverage
-                    self.vertexCov[v] += 1
                     # Link each vertex to the original sequence in which it appears
                     self.vertex2origins[v].add(name)
-                    
 
                 self.seqPaths[name] = set(np.array([self.kmer2vertex[kmer] for kmer in kmers], dtype=np.uint32))
 
@@ -77,7 +69,7 @@ class Assembler:
         del(seqDict)
         del(edges)
         print_time(f'\t100% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ')
-
+        
 
 ##    @profile
     def run(self, minlen, mincov, genome_assignment_threshold):
@@ -171,6 +163,10 @@ class Assembler:
             # Build sequence graph
             GS = Graph()
             path2vertexGS = {}
+            good = 0
+            lessGood = 0
+##            OVERLAP_RADIUS = 1000
+
             for p in paths:
                 assert p not in path2vertexGS
                 path2vertexGS[p] = int(GS.add_vertex())
@@ -178,10 +174,14 @@ class Assembler:
                 confSeqs = self.vertex2origins[p1[-1]]
                 for p2 in start2paths[sEnd[p1]]:
                     cp = set(p1+p2[1:])
+##                    cp = set(p1[-OVERLAP_RADIUS:] + p2 [1:OVERLAP_RADIUS] )
                     for name in confSeqs:
-                        if cp.issubset(self.seqPaths[name]) or self.seqPaths[name].issubset(cp):
+                        if cp.issubset(self.seqPaths[name]) or self.seqPaths[name].issubset(cp): # removing this filter increased checkm contamination
                             GS.add_edge(path2vertexGS[p1], path2vertexGS[p2])
+                            good += 1
                             break
+                    else:
+                        lessGood += 1
                            
             vertex2path = {v: p for p,v in path2vertexGS.items()}
             
@@ -215,7 +215,6 @@ class Assembler:
                 assert len(psets) == len(comp2vertexGS[cS]) / 2 # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
                 vS2rc = {}
                 for vS1, vS2 in psets.values():
-##                    assert vertex2path[vS1] == vertex2path[vS2][::-1]
                     vS2rc[vS1] = vS2
                     vS2rc[vS2] = vS1
                 self.set_vertex_filter(GS, comp2vertexGS[cS])
@@ -292,8 +291,6 @@ class Assembler:
                 for vS, c  in zip(GS.vertices(), gt.topology.label_components(GS, directed = False)[0]):
                     subcomps1_corrected[c].add(vS)
                     subcomps2_corrected[c].add(vS2rc[vS])
-##                print(len(subcomps1), len(subcomps1_corrected))# this has reduced the number of subcomponents
-##                print(len(subcomps2), len(subcomps2_corrected))# this has reduced the number of subcomponents
 
 
                 # The lines above may make a rev subcomponent may end up being contained in a fwd component
@@ -412,7 +409,7 @@ class Assembler:
                     continue
 
                 # Compute scaffold coverage
-                scaffoldCov = np.mean([self.vertexCov[v] for p in paths for v in p])
+                scaffoldCov = np.mean([len(self.vertex2origins[v]) for p in paths for v in p])
                 msg += f', cov {round(scaffoldCov, 2)}'
                 if mincov and scaffoldCov < mincov:
                     msg += ' (< mincov, IGNORED)'
@@ -436,7 +433,7 @@ class Assembler:
 ##                            for p2 in ps[1:]:
 ##                                gps = set()
 ##                                for p1 in good_paths:
-##                                    if distance(path2seq[p1], path2seq[p2]) / len(p2) < 0.25:
+##                                    if distance(path2seq[p1], path2seq[p2]) / len(p2) < 0.25: # NEEDS: from Levenshtein import distance
 ##                                        bubble_paths.add(p2)
 ##                                        m1 += 1
 ##                                    else:
@@ -608,7 +605,7 @@ class Assembler:
                                           i          = id_[1],
                                           seq        = path2seq[p],
                                           tseq       = tseq,
-                                          cov        = np.mean([self.vertexCov[v] for v in vertices]),
+                                          cov        = np.mean([len(self.vertex2origins[v]) for v in vertices]),
                                           origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     addedPaths.add(p)

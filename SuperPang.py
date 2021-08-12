@@ -12,6 +12,7 @@ from argparse import ArgumentParser
 
 from sys import argv
 from os.path import dirname, realpath
+from os import mkdir
 path = dirname(realpath(argv[0]))
 
 def main(args):
@@ -19,11 +20,43 @@ def main(args):
     uuid = uuid4().hex[:7]
     input_combined       = f'/tmp/{uuid}.combined.fasta'
     input_minimap2       = f'/tmp/{uuid}.pre.minimap2.fasta'
-    input_minimap2_kept  = args.output.rsplit('.', 1)[0] + '.unassembled.corrected.fasta'
-    outputPre_kept       = args.output.rsplit('.', 1)[0] + '.prelim.fasta'
-    outputPre2origs_kept = args.output.rsplit('.', 1)[0] + '.prelim2origins.tsv'
-    name2bin_kept        = args.output.rsplit('.', 1)[0] + '.orig2bin.tsv'
-    node2origs_kept      = args.output.rsplit('.', 1)[0] + '.node2origins.tsv'
+    params               = args.output_dir + '/params.tsv'
+    outputPre_kept       = args.output_dir + '/preliminary/prelim.fasta'
+    outputPre2origs_kept = args.output_dir + '/preliminary/prelim2origins.tsv'
+    name2bin_kept        = args.output_dir + '/preliminary/orig2bin.tsv'
+    outputNodes          = args.output_dir + '/nodes.fasta'
+    outputCore           = args.output_dir + '/core.fasta'
+    outputNode2origs     = args.output_dir + '/node2origins.tsv'
+    outputEdges          = args.output_dir + '/graph.fastg'
+    output               = args.output_dir + '/assembly.fasta'
+
+    ### Create output dirs
+    try:
+       mkdir(args.output_dir)
+    except OSError as e:
+        if e.errno != 17:
+            raise
+        elif args.force_overwrite:
+            pass
+        else:
+            print(f'\nThe directory {args.output_dir} already contains results. Add --force-overwrite to ignore this message.\n')
+            exit(1)
+    if args.keep_intermediate:
+        try:
+            mkdir(args.output_dir + '/corrected_input')
+        except OSError as e:
+            if e.errno != 17:
+                raise
+        try:
+            mkdir(args.output_dir + '/preliminary')
+        except OSError as e:
+            if e.errno != 17:
+                raise
+
+    ### Log params
+    with open(params, 'w') as outfile:
+        for arg in vars(args):
+            outfile.write(f'{arg}\t{getattr(args, arg)}\n')
 
     ### Load sequences
     name2bin = {}
@@ -42,12 +75,11 @@ def main(args):
     
     ### Correct input sequences with minimap2
     if args.identity_threshold and args.identity_threshold < 1:
-        call([path + '/' + 'run_minimap2.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
+        call([path + '/' + 'run-minimap2.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
               '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-t', str(args.threads), '--minimap2-path', args.minimap2_path, '--silent'])
         if args.keep_intermediate:
-            call(['cp', input_minimap2, input_minimap2_kept])
-            outfiles = {bin_: open(f'{bin_}.corrected.fasta', 'w') for bin_ in set(name2bin.values())} ############## check out dir
-            for name, seq in read_fasta(input_minimap2_kept).items():
+            outfiles = {bin_: open(f'{args.output_dir}/corrected_input/{bin_}.fasta', 'w') for bin_ in set(name2bin.values())}
+            for name, seq in read_fasta(input_minimap2).items():
                 outfiles[name2bin[name]].write(f'>{name}\n{seq}\n')
             for of in outfiles.values():
                 of.close()
@@ -89,14 +121,13 @@ def main(args):
             id2tag[id_] = 'aux'
         for id_ in motu.get_stats()['mOTUpan_core_prediction']['singleton_cogs']:
             id2tag[id_] = 'singleton' # singletons are also aux, we overwrite them here
-       
-    
+        
     ### Prepare assembly graph nodes
     assemblyNodes = {}
     assemblyNodesCore = {}
     nodeNames = {}
     for id_, contig in contigs.items():
-        nodeNames[id_] = f'NODE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(seq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]};'
+        nodeNames[id_] = f'NODE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(contig.tseq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]};'
         if contig.tseq:
             assemblyNodes[nodeNames[id_]] = contig.tseq
             if id2tag[id_] == 'core':
@@ -112,15 +143,17 @@ def main(args):
         succs = f':{succs}' if succs else ''
         assemblyEdges[f'{edgeNames[id_]}{succs};'] = contig.seq
 
-    ### Write final fasta output
-    write_fasta(assemblyNodes, args.output)
-    write_fasta(assemblyNodesCore, args.output.rsplit('.', 1)[0] + '.core.fasta')
-    write_fasta(assemblyEdges, args.output.rsplit('.', 1)[0] + '.fastg')
-    if args.keep_intermediate:
-        with open(node2origs_kept, 'w') as outfile:
-            for id_, contig in contigs.items():
-                origs = ','.join(contig.origins)
-                outfile.write(f'{nodeNames[id_]}\t{origs}\n')
+    ### Write final node, edge and core output
+    write_fasta(assemblyNodes, outputNodes)
+    write_fasta(assemblyNodesCore, outputCore)
+    write_fasta(assemblyEdges, outputEdges)
+    with open(outputNode2origs, 'w') as outfile:
+        for id_, contig in contigs.items():
+            origs = ','.join(contig.origins)
+            outfile.write(f'{nodeNames[id_]}\t{origs}\n')
+
+    ### Condense edges
+    call([path + '/' + 'condense-edges.py', outputEdges, output, str(args.ksize)])
 
 
 def parse_args():
@@ -129,7 +162,7 @@ def parse_args():
                         help = 'Input fasta files with the sequences for each bin')
     parser.add_argument('-q', '--checkm', type = str,
                         help = 'CheckM output for the bins')
-    parser.add_argument('-i', '--identity_threshold', type = float, default = 0.7,
+    parser.add_argument('-i', '--identity_threshold', type = float, default = 0.9,
                         help = 'Identity threshold (fraction) to initiate correction with minimap2')
     parser.add_argument('-m', '--mismatch-size-threshold', type = int, default = 100,
                         help = 'Maximum contiguous mismatch size that will be corrected')
@@ -149,14 +182,16 @@ def parse_args():
                         help = 'Default genome completeness to assume if a CheckM output is not provided')
     parser.add_argument('-t', '--threads', type = int, default = 1,
                         help = 'Number of processors to use')
-    parser.add_argument('-o', '--output', type = str, default = 'assembly.fasta',
-                        help = 'Output name')
+    parser.add_argument('-o', '--output-dir', type = str, default = 'output',
+                        help = 'Output directory')
     parser.add_argument('--assume-complete', action='store_true',
                         help = 'Assume that the input genomes are complete (--genome-assignment-threshold 1 --default-completeness 100)')
     parser.add_argument('--minimap2-path', type = str, default = 'minimap2',
                         help = 'Path to the minimap2 executable')
     parser.add_argument('--keep-intermediate', action='store_true',
                         help = 'Keep intermediate files')
+    parser.add_argument('--force-overwrite', action='store_true',
+                        help='Write results even if the output directory already exists')
     args = parser.parse_args()
     if args.assume_complete:
         args.checkm = None
