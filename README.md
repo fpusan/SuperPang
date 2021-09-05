@@ -31,3 +31,6 @@ Requires [graph-tool](https://graph-tool.skewed.de/) and [mOTUlizer](https://git
 * `core.fasta`: assembly nodes deemed to belong to the core genome of the species by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1)
 * `graph.fastg`: assembly graph in a format compatible with [bandage](https://rrwick.github.io/Bandage/)
 * `node2origins.tsv`: tab-separated file with the assembly nodes, and a comma-separated list of the input genome in which that node was deemed present
+
+## About
+*SuperPang* is developed by Fernando Puente-Sánchez (Sveriges lantsbruksuniversitet). Feel free to open an issue or reach out for support [fernando.puente.sanchez@slu.se](mailto:fernando.puente.sanchez@slu.se)).
