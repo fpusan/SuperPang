@@ -1,4 +1,4 @@
-# SuperPang: non-redundant pangenome assemblies from individual genomes or bins
+# SuperPang: non-redundant pangenome assemblies from multiple genomes or bins
 
 ## Installation
 Requires [graph-tool](https://graph-tool.skewed.de/) and [mOTUlizer](https://github.com/moritzbuck/mOTUlizer). Both can be easily installed from conda. I will make a proper bioconda package when the software becomes a bit more stable.
