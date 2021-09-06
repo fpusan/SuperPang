@@ -74,7 +74,8 @@ def main(args):
                 outfile.write(f'{name}\t{bin_}\n')
     
     ### Correct input sequences with minimap2
-    if args.identity_threshold and args.identity_threshold < 1:
+    correct = args.identity_threshold and args.identity_threshold < 1
+    if correct:
         call([path + '/' + 'run-minimap2.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
               '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-t', str(args.threads), '--minimap2-path', args.minimap2_path, '--silent'])
         if args.keep_intermediate:
@@ -105,7 +106,12 @@ def main(args):
         for id_ in contigs:
             id2tag[id_] = 'core'
     else:
-        completeness = {bin_: args.default_completeness for bin_ in set(name2bin.values())} if not args.checkm else {bin_: vals['Completeness'] for bin_, vals in parse_checkm(args.checkm).items()}
+        if not args.checkm:     
+            completeness = {bin_: args.default_completeness for bin_ in set(name2bin.values())}
+        elif args.checkm.endswith('.tsv'):
+            completeness = {bin_: float(completeness) for bin_, completeness in (line.strip().split('\t') for line in open(args.checkm))}
+        else:
+            completeness = {bin_: vals['Completeness'] for bin_, vals in parse_checkm(args.checkm).items()}
         name2ids = defaultdict(set)
         for id_, contig in contigs.items():
             for ori in contig.origins:
@@ -155,28 +161,33 @@ def main(args):
     ### Condense edges
     call([path + '/' + 'condense-edges.py', outputEdges, output, str(args.ksize)])
 
+    ### Cleanup
+    call(['rm', input_combined])
+    if correct:
+        call(['rm', input_minimap2])
+
 
 def parse_args():
     parser = ArgumentParser(description='Create a consensus pangenome assembly from a set of bins from the same mOTU')
     parser.add_argument('-f', '--fasta', type = str, nargs='+',
                         help = 'Input fasta files with the sequences for each bin')
     parser.add_argument('-q', '--checkm', type = str,
-                        help = 'CheckM output for the bins')
+                        help = 'CheckM output for the bins, or *.tsv file with bin and completeness for each bin')
     parser.add_argument('-i', '--identity_threshold', type = float, default = 0.9,
                         help = 'Identity threshold (fraction) to initiate correction with minimap2')
     parser.add_argument('-m', '--mismatch-size-threshold', type = int, default = 100,
                         help = 'Maximum contiguous mismatch size that will be corrected')
     parser.add_argument('-g', '--indel-size-threshold', type = int, default = 100,
                         help = 'Maximum contiguous indel size that will be corrected')
-    parser.add_argument('-r', '--correction-repeats', type = int, default = 1,
+    parser.add_argument('-r', '--correction-repeats', type = int, default = 5,
                         help = 'Maximum iterations for sequence correction')
-    parser.add_argument('-k', '--ksize', type = int, default = 101,
+    parser.add_argument('-k', '--ksize', type = int, default = 301,
                         help = 'Kmer size')
     parser.add_argument('-l', '--minlen', type = int, default = 0,
                         help = 'Scaffold length cutoff')
     parser.add_argument('-c', '--mincov', type = float, default = 0,
                         help = 'Scaffold coverage cutoff')
-    parser.add_argument('-a', '--genome-assignment-threshold', default = 0, type = float,
+    parser.add_argument('-a', '--genome-assignment-threshold', default = 0.5, type = float,
                         help = 'Fraction of shared kmers required to assign a contig to an input genome')
     parser.add_argument('-x', '--default-completeness', type = float, default = 50,
                         help = 'Default genome completeness to assume if a CheckM output is not provided')
