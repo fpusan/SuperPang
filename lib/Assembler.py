@@ -66,7 +66,7 @@ class Assembler:
 
         self.G = Graph()
         self.G.add_edge_list(edges)
-        del(seqDict)
+        self.seqDict = seqDict
         del(edges)
         print_time(f'\t100% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ')
         
@@ -165,23 +165,13 @@ class Assembler:
             path2vertexGS = {}
             good = 0
             lessGood = 0
-##            OVERLAP_RADIUS = 1000
 
             for p in paths:
                 assert p not in path2vertexGS
                 path2vertexGS[p] = int(GS.add_vertex())
             for p1 in paths:
-                confSeqs = self.vertex2origins[p1[-1]]
                 for p2 in start2paths[sEnd[p1]]:
-                    cp = set(p1+p2[1:])
-##                    cp = set(p1[-OVERLAP_RADIUS:] + p2 [1:OVERLAP_RADIUS] )
-                    for name in confSeqs:
-                        if cp.issubset(self.seqPaths[name]) or self.seqPaths[name].issubset(cp): # removing this filter increased checkm contamination
-                            GS.add_edge(path2vertexGS[p1], path2vertexGS[p2])
-                            good += 1
-                            break
-                    else:
-                        lessGood += 1
+                    GS.add_edge(path2vertexGS[p1], path2vertexGS[p2])
                            
             vertex2path = {v: p for p,v in path2vertexGS.items()}
             
@@ -219,43 +209,65 @@ class Assembler:
                     vS2rc[vS2] = vS1
                 self.set_vertex_filter(GS, comp2vertexGS[cS])
                 assert {int(vS) for vS in GS.vertices()} == comp2vertexGS[cS] # did we alter vS indices when filtering?
-                assert(len(set(gt.topology.label_components(GS, directed = False)[0]))) == 1
-            
+                assert(len(set(gt.topology.label_components(GS, directed = False)[0]))) == 1 # check that this is only one component
+
+                # Map the input sequences to nodes in the sequence graph (in the original orientation of the input sequence)
+                seqPathsGS = defaultdict(set)
+                addedNodes = set()
+                for pset, (vS1, vS2) in psets.items():
+                    for name, path in self.seqPaths.items():
+                        if pset.issubset(path):
+                            addedNodes.update( (vS1, vS2) )
+                            for vS in (vS1, vS2):
+                                if path2seq[vertex2path[vS]] in self.seqDict[name]: # check the string to make sure that we only add nodes from the same orientation
+                                    seqPathsGS[name].add(vS)
+                                    break
+
+                # Add nodes in the sequence graph that weren't fully contained in an original sequence
+                for vS in comp2vertexGS[cS] - addedNodes:
+                    seqPathsGS[len(seqPathsGS)] = {vS} | set(GS.get_all_neighbors(vS)) # add its neighbors so that it'll overlap with the real sequences in at least one vS
+                
+                seqPathsGS_rev = {name: {vS2rc[vS] for vS in vSs} for name, vSs in seqPathsGS.items()}
+                                
+                
                 # Separate fwd and rev
-                sources = {int(vS) for vS in GS.vertices() if not GS.get_in_neighbors(vS).shape[0] }
-                sinks   = {int(vS) for vS in GS.vertices() if not GS.get_out_neighbors(vS).shape[0]}
-
-                dists = {}
-
-                for source in sources:
-                    assert vS2rc[source] in sinks
-                    if source not in sinks:
-                        d = gt.topology.shortest_distance(GS, source, vS2rc[source], max_dist = len(comp2vertexGS[cS]) + 1) # what if there are two paths connecting source and target? Is the shortest distance still ok?
-                        dists[source] = d
-
-                sources = list(sorted(sources, key = lambda source: dists[source], reverse = True))
-
                 vSs1 = set()
-                vSs2 = set()
-                added = set()
-                for source in sources:
-                    for e in gt.search.bfs_iterator(GS, source): # is BFS the best choice? I need all fwd vertices to be visited before all rev vertices,
-                        for vS in (e.source(), e.target()):      # but it's hard to be sure without a DAG/ topoSort
-                            if vS not in added:                  # breaking cycles to get a DAG was too expensive
-                                rc = vS2rc[vS]                   # we try to fix this by starting from the source with a longest distance to its reverse complement
-                                added.add(vS)
-                                added.add(rc)
-                                vSs1.add(vS)
-                                vSs2.add(rc)
-                assert added == comp2vertexGS[cS]
+                refSeqNames = sorted(seqPathsGS, key = lambda name: seqPathsGS[name]) # sort by decreasing number of nodes in the GS
+                addedNames = {refSeqNames[0]}
+                vSs1.update(seqPathsGS[refSeqNames[0]]) # start from the longest seq
 
-                # Check that fwd and rev have the same vertices
+
+                while True:
+                    remaining = [n for n in refSeqNames if n not in addedNames] # keep them sorted
+                    if not remaining:
+                        break
+                    best_name = ''
+                    best_ol = -1 # -1 so that even if there are no overlaps (there is more than one subcomponent, and the current one is full) we add something
+                    for name in remaining: # keep starting from the longest seq, so that if there are no overlaps we add the first longest one
+                        fwd = seqPathsGS[name]
+                        rev = seqPathsGS_rev[name]
+                        fwd_ol = len(fwd & vSs1) / len(fwd) # find the best overlap (looking in both orientations) to the existing fwd component
+                        rev_ol = len(rev & vSs1) / len(rev)
+                        if fwd_ol > best_ol and fwd_ol >= rev_ol:
+                            best_ol, best_name, best_vSs = fwd_ol, name, fwd
+                        elif rev_ol > best_ol and rev_ol > fwd_ol:
+                            best_ol, best_name, best_vSs = rev_ol, name, rev
+                    assert best_name
+                    addedNames.add(best_name)
+                    best_vSs = {vS for vS in best_vSs if vS2rc[vS] not in vSs1} # don't add reverse complements at this stage
+                                                                                # some are really there and needed to keep everything into a single component
+                                                                                # some will be duplications (e.g. because one of the input genomes has an inverted region)
+                    vSs1.update(best_vSs)
+
+                vSs2 = {vS2rc[vS] for vS in vSs1}
                 v1 = {v for vS in vSs1 for v in vertex2path[vS]}
                 v2 = {v for vS in vSs2 for v in vertex2path[vS]}
-                assert v1 == v2
-                GS.clear_filters()
+
+
+                assert (vSs1 | vSs2) == comp2vertexGS[cS]
 
                 # Identify subcomponents in vS1
+                GS.clear_filters()
                 self.set_vertex_filter(GS, vSs1)
                 subcomps1 = defaultdict(set)
                 for vS,c in zip(GS.vertices(), gt.topology.label_components(GS, directed = False)[0]):
@@ -313,7 +325,7 @@ class Assembler:
                 subcomps2 = subcomps2_corrected
 
                 subcomp2vertex1 = {scS1: {v for vS in svS1 for v in vertex2path[vS]} for scS1, svS1 in subcomps1.items()} # so we don't have to compute this inside the loop
-                subcomp2vertex2 = {scS2: {v for vS in svS2 for v in vertex2path[vS]} for scS2, svS2 in subcomps2.items()}
+                subcomp2vertex2 = {scS2: {v for vS in svS2 for v in vertex2path[vS]} for scS2, svS2 in subcomps2.items()}   
 
                 # Assertions
                 v1 = set.union(*list(subcomp2vertex1.values()))
@@ -576,28 +588,10 @@ class Assembler:
                         for ori in self.vertex2origins[v]:
                             ori2cov[ori] += 1
                     ori2cov   = {ori: prev/len(vertices) for ori, prev in ori2cov.items()}
+                    # Even for complete genomes, we can have non-branching paths that belong to the core but don't have full coverage in some sequences
+                    # This can happen if there are missing bases at the beginning or end of some of the input sequences (contigs in the original assemblies)
+                    # So there is no branching, but some are missing
                     goodOris  = {ori for ori, cov in ori2cov.items() if cov >= genome_assignment_threshold}
-##                    if len(goodOris) < len(ori2cov):
-##                        print()
-##                        last = None
-##                        c = 0
-##                        for v in vertices:
-##                            oris = self.vertex2origins[v]
-##                            if not last:
-##                                last = oris
-##                                c += 1
-##                            elif oris != last:
-##                                print(last, c)
-##                                last, c = oris, 1
-##                            else:
-##                                c += 1
-##                        if p in trim_left:
-##                            assert p[0] != tp[0]
-##                        if p not in keep_right:
-##                            assert p[-1] != tp[-1]
-##                        print(last, c)
-##                        print(path2id[p], p in trim_left, p in keep_right)
-####                        breakpoint()
                     goodOris.add( list(sorted(ori2cov, key = lambda ori: ori2cov[ori], reverse = True))[0] ) # add at least the origin with the highest cov
                     goodOris = {ori.split('_Nsplit_')[0] for ori in goodOris}
                     # Go on

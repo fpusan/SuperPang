@@ -26,6 +26,7 @@ def main(args):
     name2bin_kept        = args.output_dir + '/preliminary/orig2bin.tsv'
     outputNodes          = args.output_dir + '/nodes.fasta'
     outputCore           = args.output_dir + '/core.fasta'
+    outputAux            = args.output_dir + '/auxiliary.fasta'
     outputNode2origs     = args.output_dir + '/node2origins.tsv'
     outputEdges          = args.output_dir + '/graph.fastg'
     output               = args.output_dir + '/assembly.fasta'
@@ -131,13 +132,16 @@ def main(args):
     ### Prepare assembly graph nodes
     assemblyNodes = {}
     assemblyNodesCore = {}
+    assemblyNodesAux = {}
     nodeNames = {}
     for id_, contig in contigs.items():
         nodeNames[id_] = f'NODE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(contig.tseq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]};'
         if contig.tseq:
             assemblyNodes[nodeNames[id_]] = contig.tseq
             if id2tag[id_] == 'core':
-               assemblyNodesCore[nodeNames[id_]] = contig.tseq
+                assemblyNodesCore[nodeNames[id_]] = contig.tseq
+            else:
+                assemblyNodesAux[nodeNames[id_]] = contig.tseq
 
     ### Prepare assembly graph edges
     edgeNames = {}
@@ -150,9 +154,10 @@ def main(args):
         assemblyEdges[f'{edgeNames[id_]}{succs};'] = contig.seq
 
     ### Write final node, edge and core output
-    write_fasta(assemblyNodes, outputNodes)
-    write_fasta(assemblyNodesCore, outputCore)
-    write_fasta(assemblyEdges, outputEdges)
+    write_fasta( assemblyNodes,     outputNodes )
+    write_fasta( assemblyNodesCore, outputCore  )
+    write_fasta( assemblyNodesAux,  outputAux   )
+    write_fasta( assemblyEdges,     outputEdges )
     with open(outputNode2origs, 'w') as outfile:
         for id_, contig in contigs.items():
             origs = ','.join(contig.origins)
@@ -196,7 +201,7 @@ def parse_args():
     parser.add_argument('-o', '--output-dir', type = str, default = 'output',
                         help = 'Output directory')
     parser.add_argument('--assume-complete', action='store_true',
-                        help = 'Assume that the input genomes are complete (--genome-assignment-threshold 1 --default-completeness 100)')
+                        help = 'Assume that the input genomes are complete (--genome-assignment-threshold 0.95 --default-completeness 95)')
     parser.add_argument('--minimap2-path', type = str, default = 'minimap2',
                         help = 'Path to the minimap2 executable')
     parser.add_argument('--keep-intermediate', action='store_true',
@@ -206,7 +211,7 @@ def parse_args():
     args = parser.parse_args()
     if args.assume_complete:
         args.checkm = None
-        args.genome_assignment_threshold = 1
+        args.genome_assignment_threshold = 0.95
         args.default_completeness = 100
     return args
 

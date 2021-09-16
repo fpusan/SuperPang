@@ -21,7 +21,7 @@ Requires [graph-tool](https://graph-tool.skewed.de/) and [mOTUlizer](https://git
 * *-x/--default-completeness*: Default genome completeness to assume if a CheckM output is not provided with *--checkm*. Default `50`
 * *-t/--threads*: Number of processors to use. Default `1`
 * *-o/--output*: Output directory. Default `output`
-* *--assume-complete*: Assume that the input genomes are complete (*--genome-assignment-threshold 1*, *--default-completeness 100*)
+* *--assume-complete*: Assume that the input genomes are complete (*--genome-assignment-threshold 0.95*, *--default-completeness 95*)
 * *--minimap2-path*: Path to the minimap2 executable. Default `minimap2`
 * *--keep-intermediate*: Keep intermediate files
 
@@ -30,6 +30,7 @@ Requires [graph-tool](https://graph-tool.skewed.de/) and [mOTUlizer](https://git
 * `assembly.info`: core/auxiliary and path information for each contig
 * `nodes.fasta`: assembly nodes
 * `core.fasta`: assembly nodes deemed to belong to the core genome of the species by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1)
+* `auxiliary.fasta`: assembly nodes deemed to belong to the auxiliary genome of the species
 * `graph.fastg`: assembly graph in a format compatible with [bandage](https://rrwick.github.io/Bandage/)
 * `node2origins.tsv`: tab-separated file with the assembly nodes, and a comma-separated list of the input genome in which that node was deemed present
 * `params.tsv`: parameters used in the run
