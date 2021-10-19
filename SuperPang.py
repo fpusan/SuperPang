@@ -212,7 +212,7 @@ def parse_args():
     if args.assume_complete:
         args.checkm = None
         args.genome_assignment_threshold = 0.95
-        args.default_completeness = 100
+        args.default_completeness = 95
     return args
 
 
