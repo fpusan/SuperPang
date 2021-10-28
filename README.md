@@ -36,4 +36,4 @@ Requires [graph-tool](https://graph-tool.skewed.de/) and [mOTUlizer](https://git
 * `params.tsv`: parameters used in the run
 
 ## About
-*SuperPang* is developed by Fernando Puente-Sánchez (Sveriges lantsbruksuniversitet). Feel free to open an issue or reach out for support [fernando.puente.sanchez@slu.se](mailto:fernando.puente.sanchez@slu.se)).
+*SuperPang* is developed by Fernando Puente-Sánchez (Sveriges lantsbruksuniversitet). Feel free to open an issue or reach out for support [fernando.puente.sanchez@slu.se](mailto:fernando.puente.sanchez@slu.se).
