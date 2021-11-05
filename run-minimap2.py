@@ -22,18 +22,21 @@ def main(args):
     rounds = 0
 
     print_time('Correcting input sequences with minimap2')
-    print_time('round\t#corrected\tmLen\toLen\tsim')
+    print_time('round\t#corrected\tmLen\toLen\tsim\terrors')
     while True:
         rounds += 1
         call([args.minimap2_path, '-x', 'ava-pb', current1, current1, '-t', str(args.threads), '-c', '--eqx', '-L'], stdout=open(paf, 'w'), stderr = DEVNULL if args.silent else None)
-        mLen, oLen, corrected_thisround = iterate(current1, paf, current2, corrected, identity_threshold = args.identity_threshold, mismatch_size_threshold = args.mismatch_size_threshold, indel_size_threshold = args.indel_size_threshold)
-        print_time('\t'.join(map(str, [rounds, len(corrected_thisround), mLen, oLen, round(mLen/oLen, 4)])))
+        mLen, oLen, corrected_thisround, nErrors = iterate(current1, paf, current2, corrected, identity_threshold = args.identity_threshold, mismatch_size_threshold = args.mismatch_size_threshold, indel_size_threshold = args.indel_size_threshold)
+        print_time('\t'.join(map(str, [rounds, len(corrected_thisround), mLen, oLen, round(mLen/oLen, 4), nErrors])))
         for b in corrected_thisround:
             if b not in corrected:
                 corrected[b] = set()
             corrected[b].update(corrected_thisround[b])
         call(['mv', current2, current1])
-        if not corrected_thisround:
+        if not corrected_thisround and rounds >= args.correction_repeats_min:
+            # In some cases we report no corrected_thisround because fullCorrection = False for all sequences
+            # We actually had corrected parts of them, and we will properly correct them in later rounds
+            # correction_repeats_min ensures that we will try enough in order to get to fullCorrection = True and progress from there
             break
         if rounds == args.correction_repeats:
             break
@@ -98,8 +101,8 @@ def iterate(infastq, paf, outfastq, corrected_previously, identity_threshold, mi
         else:
             pass # do something different if lenghts are equal????
     
-    
     correctedSeqs = {}
+    nErrors = 0
     # query is the sequence we want to correct, target is the template
     for target in sortedSeqs: # go from the longest target to the shortest
         if target not in overlaps: # if it doesn't overlap, go on
@@ -134,34 +137,25 @@ def iterate(infastq, paf, outfastq, corrected_previously, identity_threshold, mi
             lastEnd = -1
             for queryStart, queryEnd, targetStart, targetEnd, cigar, isRC in goodOls:
                 assert queryStart > lastEnd
-##                try:
-##                    assert queryStart > lastEnd
-##                except:
-##                    print(query, target, queryStart, queryEnd, 'last;', lastEnd)
-##                    raise
                 lastEnd = queryEnd
-                
             # Correct
-            correctedSeq = []
-            lastEnd = 0
-            for  queryStart, queryEnd, targetStart, targetEnd, cigar, isRC in goodOls:
-                correctedSeq.append(seqs[query][lastEnd:queryStart])
-                correctedSeq.append( correct_query(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
-                                                   cigar = cigar, isRC = isRC, mismatch_size_threshold = mismatch_size_threshold, indel_size_threshold =indel_size_threshold)
-                                     )
-##                try:
-##                    correctedSeq.append( correct_query(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd, cigar, isRC) )
-##                except:
-##                    print(query, target)
-##                    for ol in goodOls:
-##                        print(ol)
-##                    raise
-                lastEnd = queryEnd
-            correctedSeq.append( seqs[query][lastEnd:-1] )
-            
-            correctedSeqs[query] = ''.join(correctedSeq)
-            if fullCorrection:
-                corrected_thisround[query] = {target}
+            try:
+                correctedSeq = []
+                lastEnd = 0
+                for  queryStart, queryEnd, targetStart, targetEnd, cigar, isRC in goodOls:
+                    correctedSeq.append(seqs[query][lastEnd:queryStart])
+                    correctedSeq.append( correct_query(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
+                                                       cigar = cigar, isRC = isRC, mismatch_size_threshold = mismatch_size_threshold, indel_size_threshold =indel_size_threshold)
+                                         )
+                    lastEnd = queryEnd
+                correctedSeq.append( seqs[query][lastEnd:-1] )
+                
+                correctedSeqs[query] = ''.join(correctedSeq)
+                if fullCorrection:
+                    corrected_thisround[query] = {target}
+            except AssertionError: # we failed some assertion in correct_query. I checked a case and it was actually because the alignment/CIGAR string generated by minimap2 was wrong
+                nErrors += 1        # so we just ignore this correction completely
+                
 
     for header in seqs:
         if header not in correctedSeqs:
@@ -174,7 +168,7 @@ def iterate(infastq, paf, outfastq, corrected_previously, identity_threshold, mi
             quals = 'I'*len(seq)
             outfile.write(f'@{header}\n{seq}\n+\n{quals}\n')
 
-    return mLen, oLen, corrected_thisround
+    return mLen, oLen, corrected_thisround, nErrors
 
 
 def switch_cigar(cigar):
@@ -203,7 +197,7 @@ def correct_query(query, queryStart, queryEnd, target, targetStart, targetEnd, c
             if op == '=':
                 assert newFrag == queryFrag
 ##                try:
-##                    assert newFrag == query[queryPos:queryPos+L]
+##                    assert newFrag == queryFrag
 ##                except:
 ##                    print('ERROR!')
 ##                    print(i, L, op, isRC)
@@ -211,6 +205,11 @@ def correct_query(query, queryStart, queryEnd, target, targetStart, targetEnd, c
 ##                    print(newFrag)
 ##                    print('>QUERY')
 ##                    print(query[queryPos:queryPos+L])
+##                    print(cigar)
+##                    print('qstart', queryStart)
+##                    print(query)
+##                    print('tstart', targetStart)
+##                    print(target)
 ##                    raise
             if op == '=' or L <= mismatch_size_threshold:
                 correction.append(newFrag) # add matches, correct mismatches
@@ -256,6 +255,8 @@ def parse_args():
                         help = 'Maximum contiguous indel size that will be corrected')
     parser.add_argument('-r', '--correction-repeats', type = int, default = 1,
                         help = 'Maximum iterations for sequence correction')
+    parser.add_argument('-n', '--correction_repeats_min', type = int, default = 1,
+                        help = 'Minimum iterations for sequence correction')
     parser.add_argument('-o', '--output', type = str, default = 'corrected.fasta',
                         help = 'Output name')
     parser.add_argument('-t', '--threads', type = int, default = 1,

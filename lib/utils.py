@@ -9,7 +9,8 @@ def read_fasta(fasta, Ns = 'ignore'):
         name, seq = seq.split('\n',1)
         seq = seq.upper().replace('\n','').replace('.','').replace('-','')
         s = 0
-        assert name not in seqDict
+        if name in seqDict:
+            raise Exception(f'Sequence "{name}" is duplicated in your input file')
         if Ns == 'ignore':
             seqDict[name] = seq
         else:
@@ -34,7 +35,8 @@ def read_fastq(fastq):
             qual = infile.readline().strip()
             if not name:
                 break
-            assert name not in seqDict
+            if name in seqDict:
+                raise Exception(f'Sequence "{name}" is duplicated in your input file')
             seqDict[name] = seq
     return seqDict
 

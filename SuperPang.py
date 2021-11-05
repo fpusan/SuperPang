@@ -65,7 +65,9 @@ def main(args):
     for f in args.fasta:
         bin_ = f.rsplit('/',1)[1].rsplit('.',1)[0]
         for name, seq in read_fasta(f).items():
-            assert name not in seqDict
+            if name in seqDict:
+                #raise Exception(f'Sequence "{name}" is duplicated in your input files')
+                name = bin_ + '_' + name # assume the same name in two files is just a coincidence, and move on
             seqDict[name] = seq
             name2bin[name] = bin_
     write_fasta(seqDict, input_combined)
@@ -78,7 +80,8 @@ def main(args):
     correct = args.identity_threshold and args.identity_threshold < 1
     if correct:
         call([path + '/' + 'run-minimap2.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
-              '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-t', str(args.threads), '--minimap2-path', args.minimap2_path, '--silent'])
+              '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-n', str(args.correction_repeats_min), '-t', str(args.threads),
+              '--minimap2-path', args.minimap2_path, '--silent'])
         if args.keep_intermediate:
             outfiles = {bin_: open(f'{args.output_dir}/corrected_input/{bin_}.fasta', 'w') for bin_ in set(name2bin.values())}
             for name, seq in read_fasta(input_minimap2).items():
@@ -122,12 +125,17 @@ def main(args):
             featDict[bin_].update(name2ids[name])
         
         motu = mOTU( name = "mOTUpan_core_prediction" , faas = {} , cog_dict = featDict, checkm_dict = completeness, max_it = 100, threads = args.threads, precluster = False, method = 'default')
-        for id_ in motu.get_stats()['mOTUpan_core_prediction']['core']:
-            id2tag[id_] = 'core'
-        for id_ in motu.get_stats()['mOTUpan_core_prediction']['aux_genome']:
-            id2tag[id_] = 'aux'
-        for id_ in motu.get_stats()['mOTUpan_core_prediction']['singleton_cogs']:
-            id2tag[id_] = 'singleton' # singletons are also aux, we overwrite them here
+        if motu.get_stats()['mOTUpan_core_prediction']['core']:
+            for id_ in motu.get_stats()['mOTUpan_core_prediction']['core']:
+                id2tag[id_] = 'core'
+            for id_ in motu.get_stats()['mOTUpan_core_prediction']['aux_genome']:
+                id2tag[id_] = 'aux'
+            for id_ in motu.get_stats()['mOTUpan_core_prediction']['singleton_cogs']:
+                id2tag[id_] = 'singleton' # singletons are also aux, we overwrite them here
+        else:
+            print('mOTUpan was unable to predict the core genome for this dataset')
+            for id_ in contigs:
+                id2tag[id_] = 'noinfo'
         
     ### Prepare assembly graph nodes
     assemblyNodes = {}
@@ -140,7 +148,7 @@ def main(args):
             assemblyNodes[nodeNames[id_]] = contig.tseq
             if id2tag[id_] == 'core':
                 assemblyNodesCore[nodeNames[id_]] = contig.tseq
-            else:
+            elif id2tag[id_] == 'aux' or id2tag[id_] == 'singleton':
                 assemblyNodesAux[nodeNames[id_]] = contig.tseq
 
     ### Prepare assembly graph edges
@@ -186,6 +194,8 @@ def parse_args():
                         help = 'Maximum contiguous indel size that will be corrected')
     parser.add_argument('-r', '--correction-repeats', type = int, default = 5,
                         help = 'Maximum iterations for sequence correction')
+    parser.add_argument('-n', '--correction-repeats-min', type = int, default = 5,
+                        help = 'Minimum iterations for sequence correction')
     parser.add_argument('-k', '--ksize', type = int, default = 301,
                         help = 'Kmer size')
     parser.add_argument('-l', '--minlen', type = int, default = 0,

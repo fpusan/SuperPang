@@ -14,6 +14,7 @@ Requires [graph-tool](https://graph-tool.skewed.de/) and [mOTUlizer](https://git
 * *-m/--mismatch-size-threshold*: Maximum contiguous mismatch size that will be corrected. Default `100`
 * *-g/--indel-size-threshold*: Maximum contiguous indel size that will be corrected. Default `100`
 * *-r/--correction-repeats*: Maximum iterations for sequence correction. Default `5`
+* *-n/--correction-repeats-min*: Minimum iterations for sequence correction. Default `5`
 * *-k/--ksize*: Kmer-size. Default `301`
 * *-l/--minlen*: Scaffold length cutoff. Default `0` (no cutoff)
 * *-c/--mincov*: Scaffold coverage cutoff. Default `0` (no cutoff)

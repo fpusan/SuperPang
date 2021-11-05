@@ -147,6 +147,10 @@ class Assembler:
             ### Build a graph of connected non-branching paths, and split into fwd and rev component
             print_time(f'\tBuilding sequence graph out of {len(paths)} paths')
 
+            # Remove paths with terminally duplicated vertices
+            # Those broke our code once. we had three vSs with paths (0,0,1,2) (0,1,2) and (2,1,0) under the same pset (see below)
+            paths = [p for p in paths if p[0] != p[1] and p[-1] != p[-2]]
+
             # Translate paths into sequences
             path2seq = {p: self.reconstruct_sequence(p) for p in paths}
 
@@ -202,6 +206,14 @@ class Assembler:
                 for vS in comp2vertexGS[cS]:
                     pset = frozenset(vertex2path[vS])
                     psets[pset].append(vS)
+##                for ps, vSs in psets.items():
+##                    if len(vSs) > 2:
+##                        for vS_ in vSs:
+##                            p = vertex2path[vS_]
+##                            if p[0] == p[1] or p[-1] == p[-2]: # 
+##                                psets[ps] = [vS for vS in psets[pset] if vS != vS_]
+##                                comp2vertexGS[cS] = {vS for vS in comp2vertexGS[cS] if vS != vS_}
+                                
                 assert len(psets) == len(comp2vertexGS[cS]) / 2 # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
                 vS2rc = {}
                 for vS1, vS2 in psets.values():

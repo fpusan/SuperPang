@@ -137,7 +137,7 @@ def main():
                             for i, n in enumerate(path):
                                 tag = name2id[n].split('-')[2]
                                 s = seqs[name2longName[n]] # we don't trim for now
-                                assert tag in ('core', 'aux', 'singleton')
+                                assert tag in ('core', 'aux', 'singleton', 'noinfo')
                                 if i > 0:
                                     pos -= ksize
                                 for _ in range(len(s)):
