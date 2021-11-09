@@ -206,13 +206,8 @@ class Assembler:
                 for vS in comp2vertexGS[cS]:
                     pset = frozenset(vertex2path[vS])
                     psets[pset].append(vS)
-##                for ps, vSs in psets.items():
-##                    if len(vSs) > 2:
-##                        for vS_ in vSs:
-##                            p = vertex2path[vS_]
-##                            if p[0] == p[1] or p[-1] == p[-2]: # 
-##                                psets[ps] = [vS for vS in psets[pset] if vS != vS_]
-##                                comp2vertexGS[cS] = {vS for vS in comp2vertexGS[cS] if vS != vS_}
+                for vSs in psets.values():
+                    assert len(vSs) == 2
                                 
                 assert len(psets) == len(comp2vertexGS[cS]) / 2 # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
                 vS2rc = {}
@@ -227,27 +222,32 @@ class Assembler:
                 seqPathsGS = defaultdict(set)
                 addedNodes = set()
                 for pset, (vS1, vS2) in psets.items():
+                    assert vertex2path[vS1] == vertex2path[vS2][::-1]
+                    breakOut = False
                     for name, path in self.seqPaths.items():
                         if pset.issubset(path):
-                            addedNodes.update( (vS1, vS2) )
                             for vS in (vS1, vS2):
                                 if path2seq[vertex2path[vS]] in self.seqDict[name]: # check the string to make sure that we only add nodes from the same orientation
+                                    addedNodes.update( (vS1, vS2) )
                                     seqPathsGS[name].add(vS)
                                     break
 
                 # Add nodes in the sequence graph that weren't fully contained in an original sequence
                 for vS in comp2vertexGS[cS] - addedNodes:
-                    seqPathsGS[len(seqPathsGS)] = {vS} | set(GS.get_all_neighbors(vS)) # add its neighbors so that it'll overlap with the real sequences in at least one vS
+                    fakeName = hash( (len(seqPathsGS), vS) )
+                    seqPathsGS[fakeName] = {vS} | set(GS.get_all_neighbors(vS)) # add its neighbors so that it'll overlap with the real sequences in at least one vS
                 
                 seqPathsGS_rev = {name: {vS2rc[vS] for vS in vSs} for name, vSs in seqPathsGS.items()}
-                                
+
+                x = {vS for vSs in seqPathsGS.values() for vS in vSs}
+                y = {vS2rc[vS] for vS in x}
                 
                 # Separate fwd and rev
                 vSs1 = set()
                 refSeqNames = sorted(seqPathsGS, key = lambda name: seqPathsGS[name]) # sort by decreasing number of nodes in the GS
+
                 addedNames = {refSeqNames[0]}
                 vSs1.update(seqPathsGS[refSeqNames[0]]) # start from the longest seq
-
 
                 while True:
                     remaining = [n for n in refSeqNames if n not in addedNames] # keep them sorted
@@ -274,7 +274,6 @@ class Assembler:
                 vSs2 = {vS2rc[vS] for vS in vSs1}
                 v1 = {v for vS in vSs1 for v in vertex2path[vS]}
                 v2 = {v for vS in vSs2 for v in vertex2path[vS]}
-
 
                 assert (vSs1 | vSs2) == comp2vertexGS[cS]
 
