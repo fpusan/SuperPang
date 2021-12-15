@@ -8,6 +8,8 @@ from lib.utils import read_fasta, reverse_complement, print_time
 import graph_tool as gt
 from graph_tool.all import Graph
 
+from mappy import Aligner
+
 ### see if we can put GS.clear_filters() inside the set filters method, instead of having a lot of them throughout the code
 
 
@@ -72,7 +74,7 @@ class Assembler:
         
 
 ##    @profile
-    def run(self, minlen, mincov, genome_assignment_threshold):
+    def run(self, minlen, mincov, bubble_identity_threshold, genome_assignment_threshold):
         ### Start assembly
         Contig = namedtuple('Contig', ['scaffold', 'i', 'seq', 'tseq', 'cov', 'origins', 'successors'])
         contigs = {}
@@ -443,31 +445,34 @@ class Assembler:
                 
                 # Identify and flatten bubbles
                 bubble_paths = set()
-                path_limits = defaultdict(list)
-                for p in paths:
-                    path_limits[(p[0], p[-1])].append(p)    
-                m1 = 0
-##                for (start, end), ps in path_limits.items():
-##                    minpathlen = min(len(p) for p in ps)
-##                    if len(ps) > 1: # more than one path with similar start and end
-##                        if minpathlen <= 2*self.ksize-1: # fast way if mismatches are separated enough
-##                            ps = sorted(ps, key = lambda x: len(x), reverse = True)
-##                            good_paths = {ps[0]}
-##                            for p2 in ps[1:]:
-##                                gps = set()
-##                                for p1 in good_paths:
-##                                    if distance(path2seq[p1], path2seq[p2]) / len(p2) < 0.25: # NEEDS: from Levenshtein import distance
-##                                        bubble_paths.add(p2)
-##                                        m1 += 1
-##                                    else:
-##                                        gps.add(p2)
-##                                good_paths.update(gps)
-                                        
-                paths = [p for p in paths if p not in bubble_paths]
-                msg += f', removed {m1} bubbles'
-                print_time(msg, end = '\r')
-                GS.clear_filters()
-                self.set_vertex_filter(GS, {path2vertexGS[p] for p in paths})
+                bubble_vertex2origins = defaultdict(set) # I don't want to update self.vertex2origins since it's created in __init__ and this is run. Stupid, I know...
+                if bubble_identity_threshold and bubble_identity_threshold < 1:
+                    path_limits = defaultdict(list)
+                    for p in paths:
+                        path_limits[(p[0], p[-1])].append(p)    
+                    m1 = 0
+                    for (start, end), ps in path_limits.items():
+                        ps = sorted(ps, key = lambda x: len(x), reverse = True)
+                        minpathlen = len(ps[0])
+                        if len(ps) > 1: # more than one path with similar start and end
+                            p1 = ps[0] # the longest one
+                            s1 = path2seq[p1]
+                            ref = Aligner(seq = s1, n_threads = 1)
+                            newOris = set()
+                            for p2 in ps[1:]:                       # note that I am considering the 1st and last kmer here, which will always be shared!
+                                al = list(ref.map(path2seq[p2]))[0] # this results in higher identities for short bubbles, which is not the worst
+                                if al.mlen/al.blen >= bubble_identity_threshold: 
+                                    bubble_paths.add(p2)  
+                                    m1 += 1
+                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins[v2]} )
+                            for v1 in p1:
+                                bubble_vertex2origins[v1].update(newOris) # count vertices in p1 as appearing in all of the origins in the bubble paths that we just discarded
+                                    
+                    paths = [p for p in paths if p not in bubble_paths]
+                    msg += f', removed {m1} bubbles'
+                    print_time(msg, end = '\r')
+                    GS.clear_filters()
+                    self.set_vertex_filter(GS, {path2vertexGS[p] for p in paths})
 
                 
 
@@ -481,66 +486,67 @@ class Assembler:
                     for vS2 in GS.get_in_neighbors(path2vertexGS[p1]):
                         if vertex2path[vS2] not in bubble_paths:
                             predecessors[p1].add(vertex2path[vS2])
-##
-##                
-##                extenders = {p for p in paths if len(successors[p]) <= 1 and (successors[p] or predecessors[p])}
-##                extenders = extenders | {p for p in paths if len(predecessors[p]) == 1} ### added later, consider removing this line if we start failing assertions
-##                joinStarters =  {p for p in extenders if len(predecessors[p]) != 1 or len(successors[predecessors[p][0]]) > 1}
-##
-##                if not joinStarters: # Is this a cycle
-##                    if min(len(ps) for ps in predecessors.values()) == 1: # This does not cover the case in which there is a cycle but also a linear component
-##                        joinStarters = {list(extenders)[0]}
-##                
-##                joinExtenders = {p for p in extenders if p not in joinStarters}
-##                assert extenders == joinStarters | joinExtenders
-##
-##                paths = [p for p in paths if p not in joinStarters | joinExtenders] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
-##                
-##                visited = set()
-##                for start in joinStarters:
-##                    new_path = start
-##                    end = start
-##                    succs = successors[start]
-##                    succ = list(succs)[0] if succs else None
-##                    extended = False
-##                    while succ in joinExtenders:
-##                        extended = True
-##                        visited.add(succ)
-##                        new_path += succ[1:]
-##                        end = succ
-##                        succs = successors[succ]
-##                        succ = list(succs)[0] if succs else None
-##                    paths.append(new_path)
-##                    if extended:
-##                        sStart[new_path] = sStart[start]
-##                        sEnd[new_path] = sEnd[end]
-##                        path2seq[new_path] = self.reconstruct_sequence(new_path)
-##                        predecessors[new_path] = predecessors[start]
-##                        for pred in predecessors[new_path]:
-##                            successors[pred].append(new_path)
-##                        successors[new_path] = successors[end]
-##                        for succ in successors[new_path]:
-##                            predecessors[succ].append(new_path)
-##
-##                assert visited == joinExtenders
-##
-##                # Update scaffold graph
-##                pathSet = set(paths)
-##                for p, preds in predecessors.items():
-##                    predecessors[p] = [pred for pred in preds if pred in pathSet]
-##                predecessors = defaultdict(list, [(p, preds) for p, preds in predecessors.items() if p in pathSet])
-##                for p, succs in successors.items():
-##                    successors[p]   = [succ for succ in succs if succ in pathSet]
-##                successors   = defaultdict(list, [(p, succs) for p, succs in successors.items()   if p in pathSet])
-##
-##                    
-##                # Check that paths with one predecessor and successor happen only around branching points
-##                for p in paths:
-##                    if len(predecessors[p])==1 and len(successors[p])==1:
-##                        pred = predecessors[p][0]
-##                        succ = successors[p][0]
-##                        assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
-##                        assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
+
+                
+                extenders = {p for p in paths if len(successors[p]) <= 1 and (successors[p] or predecessors[p])}
+                extenders = extenders | {p for p in paths if len(predecessors[p]) == 1} ### added later, consider removing this line if we start failing assertions
+                joinStarters =  {p for p in extenders if len(predecessors[p]) != 1 or len(successors[list(predecessors[p])[0]]) > 1}
+
+                if not joinStarters: # Is this a cycle
+                    if min(len(ps) for ps in predecessors.values()) == 1: # This does not cover the case in which there is a cycle but also a linear component
+                        joinStarters = {list(extenders)[0]}
+                
+                joinExtenders = {p for p in extenders if p not in joinStarters}
+                assert extenders == joinStarters | joinExtenders
+
+                paths = [p for p in paths if p not in joinStarters | joinExtenders] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
+                
+                visited = set()
+                for start in joinStarters:
+                    new_path = start
+                    end = start
+                    succs = successors[start]
+                    succ = list(succs)[0] if succs else None
+                    extended = False
+                    while succ in joinExtenders:
+                        extended = True
+                        visited.add(succ)
+                        new_path += succ[1:]
+                        end = succ
+                        succs = successors[succ]
+                        succ = list(succs)[0] if succs else None
+                    paths.append(new_path)
+                    if extended:
+                        sStart[new_path] = sStart[start]
+                        sEnd[new_path] = sEnd[end]
+                        path2seq[new_path] = self.reconstruct_sequence(new_path)
+                        predecessors[new_path] = predecessors[start]
+                        for pred in predecessors[new_path]:
+                            successors[pred].add(new_path)
+                        successors[new_path] = successors[end]
+                        for succ in successors[new_path]:
+                            predecessors[succ].add(new_path)
+                        
+
+                assert visited == joinExtenders
+
+                # Update scaffold graph
+                pathSet = set(paths)
+                for p, preds in predecessors.items():
+                    predecessors[p] = [pred for pred in preds if pred in pathSet]
+                predecessors = defaultdict(list, [(p, preds) for p, preds in predecessors.items() if p in pathSet])
+                for p, succs in successors.items():
+                    successors[p]   = [succ for succ in succs if succ in pathSet]
+                successors   = defaultdict(list, [(p, succs) for p, succs in successors.items()   if p in pathSet])
+
+                    
+                # Check that paths with one predecessor and successor happen only around branching points
+                for p in paths:
+                    if len(predecessors[p])==1 and len(successors[p])==1:
+                        pred = predecessors[p][0]
+                        succ = successors[p][0]
+                        assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
+                        assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
 
                 msg += f', found {len(paths)} paths'
 
@@ -596,8 +602,10 @@ class Assembler:
                     vertices = tp
                     ori2cov = defaultdict(int)
                     for v in vertices:
-                        for ori in self.vertex2origins[v]:
-                            ori2cov[ori] += 1
+##                        if v in bubble_vertex2origins:
+##                            print('foo!')
+                        for ori in self.vertex2origins[v] | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
+                            ori2cov[ori] += 1                                         # but to bubbles that were originally in this path before we popped them
                     ori2cov   = {ori: prev/len(vertices) for ori, prev in ori2cov.items()}
                     # Even for complete genomes, we can have non-branching paths that belong to the core but don't have full coverage in some sequences
                     # This can happen if there are missing bases at the beginning or end of some of the input sequences (contigs in the original assemblies)
@@ -610,7 +618,7 @@ class Assembler:
                                           i          = id_[1],
                                           seq        = path2seq[p],
                                           tseq       = tseq,
-                                          cov        = np.mean([len(self.vertex2origins[v]) for v in vertices]),
+                                          cov        = np.mean([len(self.vertex2origins[v] | bubble_vertex2origins[v]) for v in vertices]),
                                           origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     addedPaths.add(p)

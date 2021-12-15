@@ -6,6 +6,7 @@ from mOTUlizer.classes.mOTU import mOTU
 from mOTUlizer.utils import parse_checkm
 
 from uuid import uuid4
+from hashlib import sha1
 from collections import defaultdict
 from subprocess import call
 from argparse import ArgumentParser
@@ -15,8 +16,11 @@ from os.path import dirname, realpath
 from os import mkdir
 path = dirname(realpath(argv[0]))
 
+
 def main(args):
 
+
+    ### File names
     uuid = uuid4().hex[:7]
     input_combined       = f'/tmp/{uuid}.combined.fasta'
     input_minimap2       = f'/tmp/{uuid}.pre.minimap2.fasta'
@@ -30,6 +34,13 @@ def main(args):
     outputNode2origs     = args.output_dir + '/node2origins.tsv'
     outputEdges          = args.output_dir + '/graph.fastg'
     output               = args.output_dir + '/assembly.fasta'
+
+
+    ### Get sha1 of SuperPang scripts
+    main_sha1 = sha1(open(path + '/' + 'SuperPang.py'    ).read().encode()).hexdigest()
+    homo_sha1 = sha1(open(path + '/' + 'homogenize.py'   ).read().encode()).hexdigest()
+    asse_sha1 = sha1(open(path + '/' + 'lib/Assembler.py').read().encode()).hexdigest()
+    
 
     ### Create output dirs
     try:
@@ -56,6 +67,9 @@ def main(args):
 
     ### Log params
     with open(params, 'w') as outfile:
+        outfile.write(f'main_sha1\t{main_sha1}\n')
+        outfile.write(f'homo_sha1\t{homo_sha1}\n')
+        outfile.write(f'asse_sha1\t{asse_sha1}\n')
         for arg in vars(args):
             outfile.write(f'{arg}\t{getattr(args, arg)}\n')
 
@@ -79,9 +93,14 @@ def main(args):
     ### Correct input sequences with minimap2
     correct = args.identity_threshold and args.identity_threshold < 1
     if correct:
-        call([path + '/' + 'run-minimap2.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
-              '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-n', str(args.correction_repeats_min), '-t', str(args.threads),
-              '--minimap2-path', args.minimap2_path, '--silent'])
+        for i in range(1): # support for multiple calls to run-minimap2, but apparently it made no big difference
+            if i:
+                input_combined = input_minimap2
+                input_minimap2 = f'{input_minimap2}.{i}'
+            
+            call([path + '/' + 'homogenize.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
+                  '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-n', str(args.correction_repeats_min), '-t', str(args.threads),
+                  '--minimap2-path', args.minimap2_path, '--silent'])
         if args.keep_intermediate:
             outfiles = {bin_: open(f'{args.output_dir}/corrected_input/{bin_}.fasta', 'w') for bin_ in set(name2bin.values())}
             for name, seq in read_fasta(input_minimap2).items():
@@ -92,7 +111,7 @@ def main(args):
         input_minimap2 = input_combined           
 
     ### Assemble
-    contigs = Assembler(input_minimap2, args.ksize).run(args.minlen, args.mincov, args.genome_assignment_threshold)
+    contigs = Assembler(input_minimap2, args.ksize).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold)
     if args.keep_intermediate:
         prelim = {}
         with open(outputPre2origs_kept, 'w') as outfile:
@@ -181,7 +200,7 @@ def main(args):
 
 
 def parse_args():
-    parser = ArgumentParser(description='Create a consensus pangenome assembly from a set of bins from the same mOTU')
+    parser = ArgumentParser(description='Create a consensus pangenome assembly from a set of bins/genomes from the same mOTU/species')
     parser.add_argument('-f', '--fasta', type = str, nargs='+',
                         help = 'Input fasta files with the sequences for each bin')
     parser.add_argument('-q', '--checkm', type = str,
@@ -202,6 +221,8 @@ def parse_args():
                         help = 'Scaffold length cutoff')
     parser.add_argument('-c', '--mincov', type = float, default = 0,
                         help = 'Scaffold coverage cutoff')
+    parser.add_argument('-b', '--bubble-identity-threshold', type = float, default = 0.7,
+                        help = 'Minimum identity (matches / alignment length) required to remove a bubble in the sequence graph')
     parser.add_argument('-a', '--genome-assignment-threshold', default = 0.5, type = float,
                         help = 'Fraction of shared kmers required to assign a contig to an input genome')
     parser.add_argument('-x', '--default-completeness', type = float, default = 50,
