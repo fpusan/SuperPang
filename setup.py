@@ -34,5 +34,5 @@ setuptools.setup(
     include_package_data = True,
 )
 
-# pushing stuff to pip : python3 setup.py sdist bdist_wheel
+# pushing stuff to pip : python3 setup.py sdist
 # python3 -m twine upload --repository pypi dist/*

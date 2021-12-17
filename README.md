@@ -1,12 +1,10 @@
 # SuperPang: non-redundant pangenome assemblies from multiple genomes or bins
 
 ## Installation
-Requires [graph-tool](https://graph-tool.skewed.de/), [mOTUlizer](https://github.com/moritzbuck/mOTUlizer) and [minimap2](https://github.com/lh3/minimap2).
-Easiest way to get it running right now is inside a conda environment
+Requires [graph-tool](https://graph-tool.skewed.de/), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2](https://github.com/lh3/minimap2) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
 ```
-conda create -n SuperPang -c conda-forge -c bioconda python=3.8 graph-tool minimap2
-conda activate SuperPang
-pip install SuperPang
+conda create -n SuperPang -c conda-forge -c bioconda -c fpusan superpang # Install into a new conda environment
+test-Superpang.py                                                        # Check that it works for you!
 ```
 
 ## Usage

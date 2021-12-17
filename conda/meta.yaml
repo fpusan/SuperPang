@@ -1,0 +1,71 @@
+{% set name = "superpang" %}
+{% set data = load_setup_py_data(setup_file='../setup.py', from_recipe_dir=True) %}
+{% set version = data.get('version')  %}
+
+package:
+  name: "{{ name|lower }}"
+  version: "{{ version }}"
+
+source:
+  #url: "https://files.pythonhosted.org/packages/eb/29/5aeeafe753970837fc2da4ce2185731b5f00e6c7c2fa5839a49e3f445d8f/SuperPang-{{ version }}.tar.gz"
+  #url: "https://pypi.io/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz"
+  path: ".." 
+  version: "{{ version }}"
+
+
+requirements:
+  host:
+    - python=3.8
+    - numpy
+    - igraph
+    - python-igraph
+    - biopython
+    - graph-tool
+    - minimap2
+    - mappy
+  run:
+    - python=3.8
+    - numpy
+    - igraph
+    - python-igraph
+    - biopython
+    - graph-tool
+    - minimap2
+    - mappy
+
+build:
+  number: 0
+  script: "{{PYTHON}} -m pip install https://files.pythonhosted.org/packages/39/d0/0bb235071b241f7294bfacc54623a98afddf855ba36807a8dae1717b5694/mOTUlizer-0.2.4.tar.gz --no-deps; {{ PYTHON }} -m pip install . -vv"
+
+test:
+  imports:
+    - SuperPang
+    - SuperPang.lib
+
+about:
+  home:  https://github.com/fpusan/SuperPang
+  license: GPL-3
+  license_file: ../LICENSE
+  summary: 'SuperPang: non-redundant pangenome assemblies from multiple genomes or bins'
+  description:
+          "SuperPang: non-redundant pangenome assemblies from multiple genomes or bins
+          \n
+          \n
+          To install this package with conda run:
+          \n
+          \n
+          `conda create -n SuperPang -c conda-forge -c bioconda -c fpusan superpang`
+          \n
+          \n
+          And activate it with:
+          \n
+          \n
+          `conda activate SuperPang`
+          \n
+          \n
+          Detailed usage instructions can be found at <http://github.com/fpusan/SuperPang>"
+  dev_url: https://github.com/fpusan/SuperPang
+  doc_url: https://github.com/fpusan/SuperPang
+  doc_source_url: https://github.com/fpusan/SqueezeMeta/blob/master/README.md
+  recipe-maintainers:
+      - fpusan
