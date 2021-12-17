@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 
-from lib.utils import read_fasta, write_fasta
+import sys
+from os.path import dirname, realpath
+path = dirname(realpath(sys.argv[0]))
+sys.path.remove(path)
+sys.path.append(realpath(path + '/../..'))
 
-from sys import argv
+from SuperPang.lib.utils import read_fasta, write_fasta
+
 from collections import defaultdict
 
 import graph_tool as gt
@@ -10,7 +15,7 @@ from graph_tool.all import Graph
 
 def main():
 
-    infasta, outfasta, ksize, minlen = argv[1], argv[2], int(argv[3]), int(200)
+    infasta, outfasta, ksize, minlen = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(200)
     outinfo = outfasta.rsplit('.',1)[0] + '.info.tsv'
 
     name2id  = {}

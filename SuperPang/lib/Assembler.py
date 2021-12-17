@@ -3,7 +3,7 @@ from itertools import combinations
 
 import numpy as np
 
-from lib.utils import read_fasta, reverse_complement, print_time
+from SuperPang.lib.utils import read_fasta, reverse_complement, print_time
 
 import graph_tool as gt
 from graph_tool.all import Graph

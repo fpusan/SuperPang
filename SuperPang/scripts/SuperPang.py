@@ -1,20 +1,30 @@
 #!/usr/bin/env python3
 
-from lib.Assembler import Assembler
-from lib.utils import read_fasta, write_fasta
+import sys
+from os.path import dirname, realpath
+from os import mkdir
+path = dirname(realpath(sys.argv[0]))
+sys.path.remove(path)
+sys.path.append(realpath(path + '/../..'))
+
+try:
+    import graph_tool
+except ModuleNotFoundError:
+    print('\nCan\'t import the graph_tool python module! Make sure it\'s available in your environment\n')
+    sys.exit(1)
+
+
+from SuperPang.lib.Assembler import Assembler
+from SuperPang.lib.utils import read_fasta, write_fasta
 from mOTUlizer.classes.mOTU import mOTU
 from mOTUlizer.utils import parse_checkm
 
 from uuid import uuid4
+from inspect import getfile
 from hashlib import sha1
 from collections import defaultdict
-from subprocess import call
+from subprocess import call, DEVNULL
 from argparse import ArgumentParser
-
-from sys import argv
-from os.path import dirname, realpath
-from os import mkdir
-path = dirname(realpath(argv[0]))
 
 
 def main(args):
@@ -37,9 +47,10 @@ def main(args):
 
 
     ### Get sha1 of SuperPang scripts
-    main_sha1 = sha1(open(path + '/' + 'SuperPang.py'    ).read().encode()).hexdigest()
-    homo_sha1 = sha1(open(path + '/' + 'homogenize.py'   ).read().encode()).hexdigest()
-    asse_sha1 = sha1(open(path + '/' + 'lib/Assembler.py').read().encode()).hexdigest()
+    main_sha1 = sha1(open(path + '/' + 'SuperPang.py'     ).read().encode()).hexdigest()
+    homo_sha1 = sha1(open(path + '/' + 'homogenize.py'    ).read().encode()).hexdigest()
+    asse_sha1 = sha1(open(     getfile(Assembler)         ).read().encode()).hexdigest()
+    cond_sha1 = sha1(open(path + '/' + 'condense-edges.py').read().encode()).hexdigest()
     
 
     ### Create output dirs
@@ -70,6 +81,7 @@ def main(args):
         outfile.write(f'main_sha1\t{main_sha1}\n')
         outfile.write(f'homo_sha1\t{homo_sha1}\n')
         outfile.write(f'asse_sha1\t{asse_sha1}\n')
+        outfile.write(f'cond_sha1\t{cond_sha1}\n')
         for arg in vars(args):
             outfile.write(f'{arg}\t{getattr(args, arg)}\n')
 
@@ -93,6 +105,13 @@ def main(args):
     ### Correct input sequences with minimap2
     correct = args.identity_threshold and args.identity_threshold < 1
     if correct:
+        # Check for minimap2
+        try:
+            call([args.minimap2_path, '-h'], stdout=DEVNULL, stdin=DEVNULL)
+        except FileNotFoundError:
+            print('\nCan\'t find minimap2. Make sure that it is present in your system and that the --minimap2-path is pointing to the executable\n')
+            sys.exit(1)
+        # Do stuff
         for i in range(1): # support for multiple calls to run-minimap2, but apparently it made no big difference
             if i:
                 input_combined = input_minimap2
@@ -201,8 +220,8 @@ def main(args):
 
 def parse_args():
     parser = ArgumentParser(description='Create a consensus pangenome assembly from a set of bins/genomes from the same mOTU/species')
-    parser.add_argument('-f', '--fasta', type = str, nargs='+',
-                        help = 'Input fasta files with the sequences for each bin')
+    parser.add_argument('-f', '--fasta', type = str, nargs='+', required = True,
+                        help = 'Input fasta files with the sequences for each bin/genome')
     parser.add_argument('-q', '--checkm', type = str,
                         help = 'CheckM output for the bins, or *.tsv file with bin and completeness for each bin')
     parser.add_argument('-i', '--identity_threshold', type = float, default = 0.9,

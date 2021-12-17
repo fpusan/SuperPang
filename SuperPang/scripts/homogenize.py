@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 
-from lib.utils import read_fastq, fasta2fastq, fastq2fasta, fasta2fastq, reverse_complement, print_time
+import sys
+from os.path import dirname, realpath
+path = dirname(realpath(sys.argv[0]))
+sys.path.remove(path)
+sys.path.append(realpath(path + '/../..'))
 
-from sys import stderr
+from SuperPang.lib.utils import read_fastq, fasta2fastq, fastq2fasta, fasta2fastq, reverse_complement, print_time
+
 from argparse import ArgumentParser
 
 import numpy as np

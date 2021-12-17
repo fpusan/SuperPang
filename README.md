@@ -1,14 +1,20 @@
 # SuperPang: non-redundant pangenome assemblies from multiple genomes or bins
 
 ## Installation
-Requires [graph-tool](https://graph-tool.skewed.de/) and [mOTUlizer](https://github.com/moritzbuck/mOTUlizer). Both can be easily installed from conda. I will make a proper bioconda package when the software becomes a bit more stable.
+Requires [graph-tool](https://graph-tool.skewed.de/), [mOTUlizer](https://github.com/moritzbuck/mOTUlizer) and [minimap2](https://github.com/lh3/minimap2).
+Easiest way to get it running right now is inside a conda environment
+```
+conda create -n SuperPang -c conda-forge -c bioconda python=3.8 graph-tool minimap2
+conda activate SuperPang
+pip install SuperPang
+```
 
 ## Usage
 `SuperPang.py --fasta <genome1.fasta> <genome2.fasta> <genomeN.fasta> --checkm <check_results> --output-dir <output_directory>`
 
 **Arguments**
 
-* *-f/--fasta*: Input fasta files with the sequences for each bin
+* *-f/--fasta*: Input fasta files with the sequences for each bin/genome
 * *-q/--checkm*: CheckM output for the bins. This can be the STDOUT of running checkm on all the fasta files passed in *--fasta*, or a tab-delimited file in the form `genome1 percent_completeness`. If empty, completeness will be estimated by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1) but this may lead to wrong estimations for very incomplete genomes.
 * *-i/--identity_threshold*: Identity threshold (fraction) to initiate correction with minimap2. Default `0.9`
 * *-m/--mismatch-size-threshold*: Maximum contiguous mismatch size that will be corrected. Default `100`
@@ -18,6 +24,7 @@ Requires [graph-tool](https://graph-tool.skewed.de/) and [mOTUlizer](https://git
 * *-k/--ksize*: Kmer-size. Default `301`
 * *-l/--minlen*: Scaffold length cutoff. Default `0` (no cutoff)
 * *-c/--mincov*: Scaffold coverage cutoff. Default `0` (no cutoff)
+* *-b/--bubble-identity-threshold*: Minimum identity (matches / alignment length) required to remove a bubble in the sequence graph
 * *-a/--genome-assignment-threshold*. Fraction of shared kmers required to assign a contig to an input genome (0 means a shared kmer is enough). Default `0.5`
 * *-x/--default-completeness*: Default genome completeness to assume if a CheckM output is not provided with *--checkm*. Default `50`
 * *-t/--threads*: Number of processors to use. Default `1`
