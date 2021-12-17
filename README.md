@@ -6,6 +6,7 @@ Requires [graph-tool](https://graph-tool.skewed.de/), [mOTUlizer v0.2.4](https:/
 # Install into a new conda environment
 conda create -n SuperPang -c conda-forge -c bioconda -c fpusan superpang
 # Check that it works for you!
+conda activate SuperPang
 test-SuperPang.py
 ```
 
