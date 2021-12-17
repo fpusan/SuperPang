@@ -3,8 +3,10 @@
 ## Installation
 Requires [graph-tool](https://graph-tool.skewed.de/), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2](https://github.com/lh3/minimap2) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
 ```
-conda create -n SuperPang -c conda-forge -c bioconda -c fpusan superpang # Install into a new conda environment
-test-Superpang.py                                                        # Check that it works for you!
+# Install into a new conda environment
+conda create -n SuperPang -c conda-forge -c bioconda -c fpusan superpang
+# Check that it works for you!
+test-Superpang.py
 ```
 
 ## Usage
