@@ -112,7 +112,7 @@ def main(args):
             print('\nCan\'t find minimap2. Make sure that it is present in your system and that the --minimap2-path is pointing to the executable\n')
             sys.exit(1)
         # Do stuff
-        for i in range(1): # support for multiple calls to run-minimap2, but apparently it made no big difference
+        for i in range(1): # support for multiple calls to homogenize, but apparently it made no big difference
             if i:
                 input_combined = input_minimap2
                 input_minimap2 = f'{input_minimap2}.{i}'

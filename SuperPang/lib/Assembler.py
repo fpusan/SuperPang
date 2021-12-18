@@ -2,6 +2,7 @@ from collections import defaultdict, namedtuple
 from itertools import combinations
 
 import numpy as np
+from scipy.sparse import lil_matrix, csr_matrix
 
 from SuperPang.lib.utils import read_fasta, reverse_complement, print_time
 
@@ -10,8 +11,8 @@ from graph_tool.all import Graph
 
 from mappy import Aligner
 
-### see if we can put GS.clear_filters() inside the set filters method, instead of having a lot of them throughout the code
 
+### see if we can put GS.clear_filters() inside the set filters method, instead of having a lot of them throughout the code
 
 class Assembler:
 ##    @profile
@@ -20,18 +21,17 @@ class Assembler:
         self.ksize = ksize
 
         seqDict = read_fasta(fasta, Ns = 'split')
-       
+
         print_time(f'Creating DBG from {len(seqDict)} sequences')
         
         self.edgeAbund = defaultdict(int)
         self.includedSeqs = 0
-        self.kmer2vertex = {}
+        self.hash2vertex = {}
+        self.vertex2source = {}
         self.seqPaths = {} # name: pathSet
         totalSize = sum(len(seq) for seq in seqDict.values())
         elapsedSize = 0
         lastSize = 0
-        self.vertex2kmers = {}
-        self.vertex2origins = defaultdict(set)
         
         ### Get kmers from sequences and create DBG
         edges = set()
@@ -42,29 +42,47 @@ class Assembler:
             else:
                 self.includedSeqs += 1
                 rcSeq = reverse_complement(seq)
-                kmers = self.seq2kmers(seq)
-                revkmers = self.seq2kmers(rcSeq)
-                for k, rk in zip(kmers, revkmers[::-1]):
-                    if k not in self.kmer2vertex:
-                        v = len(self.vertex2kmers) #currentVertex
-                        self.kmer2vertex[k] = v
-                        self.kmer2vertex[rk] = v
-                        self.vertex2kmers[v] = (k,rk)
+                hashes = [hash(k) for k in self.seq2kmers(seq)]
+                revhashes = [hash(rk) for rk in self.seq2kmers(rcSeq)]
+                rcDict = {}
+                for i, (h, rh) in enumerate(zip(hashes, revhashes[::-1])):
+                    rcDict[h] = rh
+                    rcDict[rh] = h
+                    if h not in self.hash2vertex and rh not in self.hash2vertex:
+                        v = len(self.vertex2source)
+                        self.hash2vertex[h] = v
+                        self.vertex2source[v] = (name, i)
                     else:
-                        v = self.kmer2vertex[k]
-                    # Link each vertex to the original sequence in which it appears
-                    self.vertex2origins[v].add(name)
+                        if h in self.hash2vertex:
+                            v = self.hash2vertex[h]
+                        else:
+                            v = self.hash2vertex[rh]
+                sp = set()
+                for h in hashes:
+                    if h in self.hash2vertex:
+                        sp.add(self.hash2vertex[h])
+                    else:
+                        sp.add(self.hash2vertex[rcDict[h]])
+                self.seqPaths[name] = sp
+                    
 
-                self.seqPaths[name] = set(np.array([self.kmer2vertex[kmer] for kmer in kmers], dtype=np.uint32))
-
-                for i in range(len(kmers)-1):
-                    k1, k2 = kmers[i],kmers[i+1]
-                    v1, v2 = self.kmer2vertex[k1], self.kmer2vertex[k2]
+                for i in range(len(hashes)-1):
+                    h1, h2 = hashes[i],hashes[i+1]
+                    if h1 in self.hash2vertex:
+                        v1 = self.hash2vertex[h1]
+                    else:
+                        v1 = self.hash2vertex[rcDict[h1]]
+                    if h2 in self.hash2vertex:
+                        v2 = self.hash2vertex[h2]
+                    else:
+                        v2 = self.hash2vertex[rcDict[h2]]
                     edges.add( (v1, v2) )
                     edges.add( (v2, v1) )
                 if elapsedSize - lastSize > totalSize/100:
-                    print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {len(self.vertex2kmers)} vertices, {len(edges)} edges         ', end = '\r')
+                    print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {len(self.vertex2source)} vertices, {len(edges)} edges         ', end = '\r')
                     lastSize = elapsedSize
+
+##        import sys; print('\n'); sys.exit()
 
         self.G = Graph()
         self.G.add_edge_list(edges)
@@ -416,7 +434,7 @@ class Assembler:
                 # Test that the scaffolds are really connected
                 GS.clear_filters() # NEVER FORGET!!!
                 self.set_vertex_filter(GS, {path2vertexGS[p] for p in paths})
-                msg = f'\tScaffold {scaffold}, {GS.num_vertices()} vertices, {GS.num_edges()} edges'
+                msg = f'\tScaffold {scaffold}, {GS.num_vertices()} seq vertices, {GS.num_edges()} seq edges'
                 print_time(msg, end = '\r')
                 assert len(set(gt.topology.label_components(GS, directed = False)[0])) == 1
 
@@ -434,7 +452,7 @@ class Assembler:
                     continue
 
                 # Compute scaffold coverage
-                scaffoldCov = np.mean([len(self.vertex2origins[v]) for p in paths for v in p])
+                scaffoldCov = np.mean([len(self.vertex2origins(v)) for p in paths for v in p])
                 msg += f', cov {round(scaffoldCov, 2)}'
                 if mincov and scaffoldCov < mincov:
                     msg += ' (< mincov, IGNORED)'
@@ -464,7 +482,7 @@ class Assembler:
                                 if al.mlen/al.blen >= bubble_identity_threshold: 
                                     bubble_paths.add(p2)  
                                     m1 += 1
-                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins[v2]} )
+                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins(v2)} )
                             for v1 in p1:
                                 bubble_vertex2origins[v1].update(newOris) # count vertices in p1 as appearing in all of the origins in the bubble paths that we just discarded
                                     
@@ -602,9 +620,7 @@ class Assembler:
                     vertices = tp
                     ori2cov = defaultdict(int)
                     for v in vertices:
-##                        if v in bubble_vertex2origins:
-##                            print('foo!')
-                        for ori in self.vertex2origins[v] | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
+                        for ori in self.vertex2origins(v) | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
                             ori2cov[ori] += 1                                         # but to bubbles that were originally in this path before we popped them
                     ori2cov   = {ori: prev/len(vertices) for ori, prev in ori2cov.items()}
                     # Even for complete genomes, we can have non-branching paths that belong to the core but don't have full coverage in some sequences
@@ -618,7 +634,7 @@ class Assembler:
                                           i          = id_[1],
                                           seq        = path2seq[p],
                                           tseq       = tseq,
-                                          cov        = np.mean([len(self.vertex2origins[v] | bubble_vertex2origins[v]) for v in vertices]),
+                                          cov        = np.mean([len(self.vertex2origins(v) | bubble_vertex2origins[v]) for v in vertices]),
                                           origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     addedPaths.add(p)
@@ -646,14 +662,17 @@ class Assembler:
         # Which kmers give us a meaningful sequence?
         # We are reading this in a given direction (from path[0] to path[-1])
         # For the starting kmer (in position 0), pick the one that overlaps with any of the two kmers in position 1
-        if any(k[:-1]==self.vertex2kmers[path[0]][0][1:] for k in self.vertex2kmers[path[1]]):
-            kmers.append(self.vertex2kmers[path[0]][0])
-        if any(k[:-1]==self.vertex2kmers[path[0]][1][1:] for k in self.vertex2kmers[path[1]]):
-            kmers.append(self.vertex2kmers[path[0]][1])
-        assert len(kmers) == 1
+        k0x = self.vertex2kmer(path[0])
+        k1x = self.vertex2kmer(path[1]) 
+        for k1 in (k1x, reverse_complement(k1x)):
+            for k0 in (k0x, reverse_complement(k0x)):
+                if k1[:-1] in k0:
+                    kmers.append(k0)
+
         # Then just keep advancing in the path, for each vertex pick the kmer that overlaps with the previously-picked kmer
         for v in path[1:]:
-            ks = self.vertex2kmers[v]
+            k = self.vertex2kmer(v)
+            ks = (k, reverse_complement(k))
             toadd = []
             for k in ks:
                 if k[:-1] == kmers[-1][1:]:
@@ -663,6 +682,17 @@ class Assembler:
                 break
             kmers.extend(toadd)
         return self.seq_from_kmers(kmers)
+
+
+    def vertex2origins(self, v):
+        return {name for name, vs in self.seqPaths.items() if v in vs}
+
+
+    def vertex2kmer(self, v):
+        name, i = self.vertex2source[v]
+        return self.seqDict[name][i:i+self.ksize]
+            
+
         
     @staticmethod
     def seq_from_kmers(kmers):

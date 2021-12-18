@@ -30,7 +30,8 @@ def main(args):
     print_time('round\t#corrected\tmLen\toLen\tsim\terrors')
     while True:
         rounds += 1
-        call([args.minimap2_path, '-x', 'ava-pb', current1, current1, '-t', str(args.threads), '-c', '--eqx', '-L'], stdout=open(paf, 'w'), stderr = DEVNULL if args.silent else None)
+        call([args.minimap2_path, '-x', 'asm20', '-f', '100', current1, current1, '-t', str(args.threads), '-c', '--eqx', '-L'], stdout=open(paf, 'w'), stderr = DEVNULL if args.silent else None)
+        #call([args.minimap2_path, '-x', 'ava-pb', '-f', '100', current1, current1, '-t', str(args.threads), '-c', '--eqx', '-L'], stdout=open(paf, 'w'), stderr = DEVNULL if args.silent else None)
         mLen, oLen, corrected_thisround, nErrors = iterate(current1, paf, current2, corrected, identity_threshold = args.identity_threshold, mismatch_size_threshold = args.mismatch_size_threshold, indel_size_threshold = args.indel_size_threshold)
         print_time('\t'.join(map(str, [rounds, len(corrected_thisround), mLen, oLen, round(mLen/oLen, 4), nErrors])))
         for b in corrected_thisround:
