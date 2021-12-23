@@ -130,7 +130,7 @@ def main(args):
         input_minimap2 = input_combined           
 
     ### Assemble
-    contigs = Assembler(input_minimap2, args.ksize).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold)
+    contigs = Assembler(input_minimap2, args.ksize, args.threads).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads)
     if args.keep_intermediate:
         prelim = {}
         with open(outputPre2origs_kept, 'w') as outfile:

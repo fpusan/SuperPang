@@ -1,10 +1,14 @@
 from collections import defaultdict, namedtuple
 from itertools import combinations
+from multiprocessing import Pool
+from multiprocessing.managers import SharedMemoryManager
+from functools import partial
 
 import numpy as np
 from scipy.sparse import lil_matrix, csr_matrix
 
 from SuperPang.lib.utils import read_fasta, reverse_complement, print_time
+from SuperPang.lib.Compressor import Compressor
 
 import graph_tool as gt
 from graph_tool.all import Graph
@@ -15,89 +19,158 @@ from mappy import Aligner
 ### see if we can put GS.clear_filters() inside the set filters method, instead of having a lot of them throughout the code
 
 class Assembler:
-##    @profile
-    def __init__(self, fasta, ksize):
+
+    ### MULTIPROCESS METHODS
+    # In order to save memory minimize serialization/deserialization overheads when multiprocessing we will pass the input variables to our target function as class attributes (a.k.a. gloryfied globals).
+    # We set them before opening the process pool: this way they get inherited when forking the original process, and linux's Copy On Write makes it so memory is actually not copied unless it is modified.
+    # The output of our function still needs to be serialized by the workers and deserialized by the main process, so this will not work if outputs are large and frequent
+    # For that we can use shared memory (see __init__), particularly for output amenable to be stored in array (ints, bytes...)
+
+    multiprocessing_globals = tuple()
+
+    @classmethod
+    def set_multiprocessing_globals(cls, *args):
+        # Multiprocessing.Pool.map comes with a significant overhead in serializing the arguments and sending them to the workers, which beats the purpose of multiprocessing.
+        # What we'll do instead is store the required variables as a class attribute before starting the pool. Those will be copied when forking the process, which is much faster.
+        cls.multiprocessing_globals = args
+
+
+    @classmethod
+    def clear_multiprocessing_globals(cls):
+        cls.multiprocessing_globals = tuple()
+
+
+    @classmethod
+    def get_multiprocessing_globals(cls):
+        return cls.multiprocessing_globals if len(cls.multiprocessing_globals) > 1 else cls.multiprocessing_globals[0]
+
+
+    @classmethod
+    def multimap(cls, fun, threads, iterable, *args, single_thread_threshold = 24, imap = False, pool = None):
+        args = [iterable] + list(args)
+        cls.set_multiprocessing_globals(*args)
+        if threads == 1 or len(iterable) < single_thread_threshold:
+            res = list(map(fun, range(len(iterable))))
+        else:
+            with Pool(threads) as pool:
+                res = pool.map(fun, range(len(iterable)))
+        cls.clear_multiprocessing_globals()
+        return res
+    ###############################
+
+
+
+    ##    @profile
+    def __init__(self, fasta, ksize, threads):
+        """
+        Build a De-Bruijn Graph from an input fasta file
+        """
 
         self.ksize = ksize
-
-        seqDict = read_fasta(fasta, Ns = 'split')
-
-        print_time(f'Creating DBG from {len(seqDict)} sequences')
-        
-        self.edgeAbund = defaultdict(int)
         self.includedSeqs = 0
         self.hash2vertex = {}
-        self.vertex2source = {}
+        self.vertex2hash = {}
         self.seqPaths = {} # name: pathSet
-        totalSize = sum(len(seq) for seq in seqDict.values())
+
+        ### Read input sequences
+        print_time(f'Reading sequences')
+        self.seqDict = read_fasta(fasta, Ns = 'split')     
+
+        ### Kmer hashing related parameters
+        self.compressor = Compressor(self.ksize)
+        clength = self.ksize // 4 + self.ksize % 4                # the length of a hash
+        maxseqlength = max(len(s) for s in self.seqDict.values()) # length of the largest input sequence
+        maxnkmers = maxseqlength-self.ksize+1                     # number of kmers in the largest input sequence
+
+        ### Get kmers from sequences and create DBG
+        print_time(f'Creating DBG from {len(self.seqDict)} sequences')
+        edges = set()
+        totalSize = sum(len(seq) for seq in self.seqDict.values())
         elapsedSize = 0
         lastSize = 0
-        
-        ### Get kmers from sequences and create DBG
-        edges = set()
-        for name, seq in seqDict.items():
-            elapsedSize += len(seq)
-            if len(seq) <= self.ksize:
-                continue
-            else:
-                self.includedSeqs += 1
-                rcSeq = reverse_complement(seq)
-                hashes = [hash(k) for k in self.seq2kmers(seq)]
-                revhashes = [hash(rk) for rk in self.seq2kmers(rcSeq)]
-                rcDict = {}
-                for i, (h, rh) in enumerate(zip(hashes, revhashes[::-1])):
-                    rcDict[h] = rh
-                    rcDict[rh] = h
-                    if h not in self.hash2vertex and rh not in self.hash2vertex:
-                        v = len(self.vertex2source)
-                        self.hash2vertex[h] = v
-                        self.vertex2source[v] = (name, i)
-                    else:
-                        if h in self.hash2vertex:
-                            v = self.hash2vertex[h]
-                        else:
-                            v = self.hash2vertex[rh]
-                sp = set()
-                for h in hashes:
-                    if h in self.hash2vertex:
-                        sp.add(self.hash2vertex[h])
-                    else:
-                        sp.add(self.hash2vertex[rcDict[h]])
-                self.seqPaths[name] = sp
-                    
 
-                for i in range(len(hashes)-1):
-                    h1, h2 = hashes[i],hashes[i+1]
-                    if h1 in self.hash2vertex:
-                        v1 = self.hash2vertex[h1]
-                    else:
-                        v1 = self.hash2vertex[rcDict[h1]]
-                    if h2 in self.hash2vertex:
-                        v2 = self.hash2vertex[h2]
-                    else:
-                        v2 = self.hash2vertex[rcDict[h2]]
-                    edges.add( (v1, v2) )
-                    edges.add( (v2, v1) )
-                if elapsedSize - lastSize > totalSize/100:
-                    print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {len(self.vertex2source)} vertices, {len(edges)} edges         ', end = '\r')
-                    lastSize = elapsedSize
+        with SharedMemoryManager() as smm:
+            # seqMem and rcSeqMem are two shared mem buffers that will hold the fwd and rev sequences
+            #    they are pre-allocated using the size of the largest sequence, for each sequence we will
+            #    store/recover the correct amount of bytes according to its length
+            # hashMem and revhashMem are two continuous shared mem buffers that will hold all the hashes concatenated
+            #    they are pre-allocated using the number of kmers in the largest sequence multiplied by the hash size
+            #    to store/recover a particular hash we can just use the right slice of the mem buffer, since hash size is constant
 
-##        import sys; print('\n'); sys.exit()
+            seqMem     = smm.SharedMemory(size=maxseqlength)
+            rcSeqMem   = smm.SharedMemory(size=maxseqlength)
+            hashMem    = smm.SharedMemory(size=clength*maxnkmers)
+            revhashMem = smm.SharedMemory(size=clength*maxnkmers)
+            self.set_multiprocessing_globals(seqMem, rcSeqMem, hashMem, revhashMem, self.ksize, clength, self.compressor)
+            with Pool(threads) as pool:
+            
+                for name, seq in self.seqDict.items():
+                    elapsedSize += len(seq)
+                    if len(seq) <= self.ksize:
+                        continue
+                    else:
+                        self.includedSeqs += 1
+                        rcSeq = reverse_complement(seq)
+                        seq, rcSeq = seq.encode(), rcSeq.encode()
+                        nkmers = len(seq)-self.ksize+1
+
+                        seqMem.buf  [:len(seq)  ] = seq
+                        rcSeqMem.buf[:len(rcSeq)] = rcSeq
+
+                        seq2hashes_ = partial(self.seq2hashes, seqlength=len(seq)) # we can't pass seqlength as a global when forking
+                                                                                   #  since it changes for every sequence
+                        pool.map(seq2hashes_, range(nkmers))
+
+                        # Retrieve the kmer hashes from the memory buffers
+                        # Note the use of a generator expression so that all the hashes are not residing in memory at the same time
+                        #  ... so we can't close the pool until we finish going through such generator expression!
+                        hashes = (hashMem.buf[i*clength:(i+1)*clength].tobytes() for i in range(nkmers))
+                        revhashes = (revhashMem.buf[i*clength:(i+1)*clength].tobytes() for i in range(nkmers))
+                        
+                        self.clear_multiprocessing_globals()
+
+                        # Populate the DBG
+                        sp = set()
+                        prev = -1 # store the previous vertex here so we can build (prev, v) edge tuples
+                        for h, rh in zip(hashes, revhashes):
+                            if h not in self.hash2vertex and rh not in self.hash2vertex:
+                                v = len(self.hash2vertex)
+                                self.hash2vertex[h] = v
+                                self.vertex2hash[v] = h
+                            elif h in self.hash2vertex:
+                                v = self.hash2vertex[h]
+                            elif rh in self.hash2vertex:
+                                v = self.hash2vertex[rh]
+                            else:
+                                raise('wtf')
+                            sp.add(v)
+                            if prev >=0:
+                                edges.add( (prev, v) )
+                                edges.add( (v, prev) )
+                            prev = v
+                                
+                        self.seqPaths[name] = sp    
+                                                
+                        if elapsedSize - lastSize > totalSize/100:
+                            print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {len(self.hash2vertex)} vertices, {len(edges)} edges         ', end = '\r')
+                            lastSize = elapsedSize
 
         self.G = Graph()
         self.G.add_edge_list(edges)
-        self.seqDict = seqDict
-        del(edges)
         print_time(f'\t100% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ')
+
         
 
 ##    @profile
-    def run(self, minlen, mincov, bubble_identity_threshold, genome_assignment_threshold):
-        ### Start assembly
+    def run(self, minlen, mincov, bubble_identity_threshold, genome_assignment_threshold, threads):
+        """
+        Create contigs from a De-Bruijn Graph
+        """
+
         Contig = namedtuple('Contig', ['scaffold', 'i', 'seq', 'tseq', 'cov', 'origins', 'successors'])
         contigs = {}
         addedPaths = set()
-        
+
         ### Identify connected components
         print_time('Identifying connected components')
         vertex2comp = {v: c for v, c in enumerate(gt.topology.label_components(self.G, directed = False)[0])}
@@ -172,7 +245,7 @@ class Assembler:
             paths = [p for p in paths if p[0] != p[1] and p[-1] != p[-2]]
 
             # Translate paths into sequences
-            path2seq = {p: self.reconstruct_sequence(p) for p in paths}
+            path2seq = dict(zip(paths, self.multimap(self.reconstruct_sequence, threads, paths, self.vertex2hash, self.compressor)))
 
             # Collect prefixes-suffixes for locating potential overlaps
             start2paths = defaultdict(set) # first k nucleotides
@@ -238,20 +311,20 @@ class Assembler:
                 assert {int(vS) for vS in GS.vertices()} == comp2vertexGS[cS] # did we alter vS indices when filtering?
                 assert(len(set(gt.topology.label_components(GS, directed = False)[0]))) == 1 # check that this is only one component
 
-                # Map the input sequences to nodes in the sequence graph (in the original orientation of the input sequence)
-                seqPathsGS = defaultdict(set)
-                addedNodes = set()
                 for pset, (vS1, vS2) in psets.items():
                     assert vertex2path[vS1] == vertex2path[vS2][::-1]
-                    breakOut = False
-                    for name, path in self.seqPaths.items():
-                        if pset.issubset(path):
-                            for vS in (vS1, vS2):
-                                if path2seq[vertex2path[vS]] in self.seqDict[name]: # check the string to make sure that we only add nodes from the same orientation
-                                    addedNodes.update( (vS1, vS2) )
-                                    seqPathsGS[name].add(vS)
-                                    break
 
+                # Map the input sequences to nodes in the sequence graph (in the original orientation of the input sequence)
+                names = list(self.seqPaths.keys())
+                seqPathsGS = dict(zip(names, self.multimap(self.get_seqPathsGS, 24, names, self.seqPaths, psets, path2seq, vertex2path, self.seqDict)))
+                seqPathsGS = {name: spGSs for name, spGSs in seqPathsGS.items() if spGSs}
+
+                    
+                addedNodes = set()
+                for spGS in seqPathsGS.values():
+                    for vS in spGS:
+                        addedNodes.update( (vS, vS2rc[vS]) )
+                    
                 # Add nodes in the sequence graph that weren't fully contained in an original sequence
                 for vS in comp2vertexGS[cS] - addedNodes:
                     fakeName = hash( (len(seqPathsGS), vS) )
@@ -261,6 +334,7 @@ class Assembler:
 
                 x = {vS for vSs in seqPathsGS.values() for vS in vSs}
                 y = {vS2rc[vS] for vS in x}
+
                 
                 # Separate fwd and rev
                 vSs1 = set()
@@ -315,7 +389,6 @@ class Assembler:
                 
                 subcomp2vertex1 = {scS1: {v for vS in svS1 for v in vertex2path[vS]} for scS1, svS1 in subcomps1.items()} # so we don't have to compute this inside the loop
                 subcomp2vertex2 = {scS2: {v for vS in svS2 for v in vertex2path[vS]} for scS2, svS2 in subcomps2.items()}
-
 
                 # Try to merge into one fwd and one rev subcomp
                 # In some cases the fwd and rev sequences can be actually be present in the same genome
@@ -401,7 +474,6 @@ class Assembler:
 
             assert len(rcComps) == len(comp2vertexGS) # all our components have a rc component, splitting was successful
 
-
             # Treat the component with more ATG as fwd and report it
             ATGs = defaultdict(int)
             for cS, vSs in comp2vertexGS.items():
@@ -429,6 +501,7 @@ class Assembler:
             for cs1, cs2 in combinations(compS2paths, 2):
                 assert not compS2paths[cs1] & compS2paths[cs2]
 
+
             ### Process each scaffold in the sequence graph
             for scaffold, paths in compS2paths.items():
                 # Test that the scaffolds are really connected
@@ -452,7 +525,7 @@ class Assembler:
                     continue
 
                 # Compute scaffold coverage
-                scaffoldCov = np.mean([len(self.vertex2origins(v)) for p in paths for v in p])
+                scaffoldCov = np.mean(self.multimap(self.vertex2originslen, threads, [v for p in paths for v in p], self.seqPaths, single_thread_threshold = 10000))
                 msg += f', cov {round(scaffoldCov, 2)}'
                 if mincov and scaffoldCov < mincov:
                     msg += ' (< mincov, IGNORED)'
@@ -463,7 +536,7 @@ class Assembler:
                 
                 # Identify and flatten bubbles
                 bubble_paths = set()
-                bubble_vertex2origins = defaultdict(set) # I don't want to update self.vertex2origins since it's created in __init__ and this is run. Stupid, I know...
+                bubble_vertex2origins = defaultdict(set) # Keep track of the new ones here, the originals are calculated on the fly to save memory
                 if bubble_identity_threshold and bubble_identity_threshold < 1:
                     path_limits = defaultdict(list)
                     for p in paths:
@@ -482,7 +555,7 @@ class Assembler:
                                 if al.mlen/al.blen >= bubble_identity_threshold: 
                                     bubble_paths.add(p2)  
                                     m1 += 1
-                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins(v2)} )
+                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins(v2, self.seqPaths)} )
                             for v1 in p1:
                                 bubble_vertex2origins[v1].update(newOris) # count vertices in p1 as appearing in all of the origins in the bubble paths that we just discarded
                                     
@@ -518,6 +591,7 @@ class Assembler:
                 assert extenders == joinStarters | joinExtenders
 
                 paths = [p for p in paths if p not in joinStarters | joinExtenders] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
+                newPaths = []
                 
                 visited = set()
                 for start in joinStarters:
@@ -537,13 +611,15 @@ class Assembler:
                     if extended:
                         sStart[new_path] = sStart[start]
                         sEnd[new_path] = sEnd[end]
-                        path2seq[new_path] = self.reconstruct_sequence(new_path)
+                        newPaths.append(new_path)
                         predecessors[new_path] = predecessors[start]
                         for pred in predecessors[new_path]:
                             successors[pred].add(new_path)
                         successors[new_path] = successors[end]
                         for succ in successors[new_path]:
                             predecessors[succ].add(new_path)
+
+                path2seq.update(dict(zip(newPaths, self.multimap(self.reconstruct_sequence, threads, newPaths, self.vertex2hash, self.compressor))))
                         
 
                 assert visited == joinExtenders
@@ -566,7 +642,9 @@ class Assembler:
                         assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
                         assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
 
-                msg += f', found {len(paths)} paths'
+                msg += f', processing {len(paths)} paths'
+                print_time(msg, end = '\r')
+                
 
                 # By default we'll trim overlaps at 3', but we make exceptions
                 # The idea is to remove also overlaps between to sequences sharing the same predecessor
@@ -611,18 +689,13 @@ class Assembler:
 
                 # Update global results
                     
-                path2id = {p: (scaffold, i) for i, p in enumerate(paths)}
+                path2id  = {p: (scaffold, i) for i, p in enumerate(paths)}
+                ori2covs = self.multimap(self.get_ori2cov, threads, trimmedPaths, self.seqPaths, bubble_vertex2origins) # Using trimmedPaths: don't take into account overlaps with other paths for mean cov calculation and origin reporting
+                pathCovs = self.multimap(self.get_pathCov, threads, trimmedPaths, self.seqPaths, bubble_vertex2origins)
 
-                for p, tp, tseq in zip(paths, trimmedPaths, trimmedSeqs):
+                for p, ori2cov, pathCov, tseq in zip(paths, ori2covs, pathCovs, trimmedSeqs):
                     assert p not in addedPaths
                     id_ = path2id[p]
-                    # Don't take into account overlaps with other paths for mean cov calculation and origin reporting
-                    vertices = tp
-                    ori2cov = defaultdict(int)
-                    for v in vertices:
-                        for ori in self.vertex2origins(v) | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
-                            ori2cov[ori] += 1                                         # but to bubbles that were originally in this path before we popped them
-                    ori2cov   = {ori: prev/len(vertices) for ori, prev in ori2cov.items()}
                     # Even for complete genomes, we can have non-branching paths that belong to the core but don't have full coverage in some sequences
                     # This can happen if there are missing bases at the beginning or end of some of the input sequences (contigs in the original assemblies)
                     # So there is no branching, but some are missing
@@ -634,10 +707,12 @@ class Assembler:
                                           i          = id_[1],
                                           seq        = path2seq[p],
                                           tseq       = tseq,
-                                          cov        = np.mean([len(self.vertex2origins(v) | bubble_vertex2origins[v]) for v in vertices]),
+                                          cov        = pathCov,
                                           origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     addedPaths.add(p)
+
+                msg += ', done'
                 print_time(msg)
 
                     
@@ -645,25 +720,48 @@ class Assembler:
         return contigs
 
 
+    ################################ AUX METHODS
+
     @staticmethod
     def set_vertex_filter(GS, vSS):
+        """
+        Set a vertex filter in a graph_tool Graph
+        """
         for vS in GS.vertices():
             GS.vp.vfilt[vS] = vS in vSS
         GS.set_vertex_filter(GS.vp.vfilt)
 
 
-    def seq2kmers(self, seq):
-        return [seq[i:i+self.ksize] for i in range(len(seq)-self.ksize+1)]
+    @classmethod
+    def seq2hashes(cls, i, seqlength):
+        """
+        Obtain sequence hashes for the kmers of a forward and a reverse sequence
+        Stores results in two shared memory buffers
+        """
+        # hashMem and revhashMem are two continuous shared mem buffers that will hold all the hashes concatenated
+        # for each index, we just read/write from/to the proper slices, since hash size is constant
+        seqMem, rcSeqMem, hashMem, revhashMem, ksize, clength, compressor = cls.get_multiprocessing_globals()
+        seq, rcSeq = seqMem.buf[:seqlength], rcSeqMem.buf[:seqlength]
+        ri = len(rcSeq) - i - ksize
+        hashMem.buf[i*clength:(i+1)*clength] = compressor.compress(seq[i:i+ksize])
+        revhashMem.buf[i*clength:(i+1)*clength] = compressor.compress(rcSeq[ri:ri+ksize])     
 
 
-    def reconstruct_sequence(self, path):
+    @classmethod
+    def reconstruct_sequence(cls, i):
+        """
+        Reconstruct a nucleotide sequence for a De-Bruijn Graph path
+        """
+        paths, vertex2hash, compressor = cls.get_multiprocessing_globals()
+        path = paths[i]
         kmers = []
+        vertex2kmer = partial(cls.vertex2kmer, vertex2hash = vertex2hash, compressor = compressor)
         # Each vertex corresponds to two kmers (fwd and rev)
         # Which kmers give us a meaningful sequence?
         # We are reading this in a given direction (from path[0] to path[-1])
         # For the starting kmer (in position 0), pick the one that overlaps with any of the two kmers in position 1
-        k0x = self.vertex2kmer(path[0])
-        k1x = self.vertex2kmer(path[1]) 
+        k0x = vertex2kmer(path[0])
+        k1x = vertex2kmer(path[1]) 
         for k1 in (k1x, reverse_complement(k1x)):
             for k0 in (k0x, reverse_complement(k0x)):
                 if k1[:-1] in k0:
@@ -671,7 +769,7 @@ class Assembler:
 
         # Then just keep advancing in the path, for each vertex pick the kmer that overlaps with the previously-picked kmer
         for v in path[1:]:
-            k = self.vertex2kmer(v)
+            k = vertex2kmer(v)
             ks = (k, reverse_complement(k))
             toadd = []
             for k in ks:
@@ -681,25 +779,90 @@ class Assembler:
             if not toadd:
                 break
             kmers.extend(toadd)
-        return self.seq_from_kmers(kmers)
+        return cls.seq_from_kmers(kmers)
 
 
-    def vertex2origins(self, v):
-        return {name for name, vs in self.seqPaths.items() if v in vs}
+    @classmethod
+    def vertex2kmer(cls, v, vertex2hash, compressor):
+        """
+        Return the kmer corresponding to a given vertex in the De-Bruijn Graph
+        """
+        return compressor.decompress(vertex2hash[v])
 
 
-    def vertex2kmer(self, v):
-        name, i = self.vertex2source[v]
-        return self.seqDict[name][i:i+self.ksize]
-            
 
-        
     @staticmethod
     def seq_from_kmers(kmers):
+        """
+        Reconstruct a nucleotide sequence from a list of kmers
+        """
         fullseq = [kmers[0]]
         extra = [kmer[-1] for kmer in kmers[1:]]
         fullseq.extend(extra)
         return ''.join(fullseq)
+
+    
+
+    @classmethod
+    def get_seqPathsGS(cls, i):
+        """
+        Return the vertices in the Sequence Graph that are contained in a given input sequence in its original orientation
+        """
+        names, seqPaths, psets, path2seq, vertex2path, seqDict = cls.get_multiprocessing_globals()
+        name = names[i]
+        path = seqPaths[name]     
+        
+        spGS = set()
+        for pset, (vS1, vS2) in psets.items():
+            if pset.issubset(path):
+                for vS in (vS1, vS2):
+                    if path2seq[vertex2path[vS]] in seqDict[name]: # check the string to make sure that we only add nodes from the same orientation
+                        spGS.add(vS)
+                        break
+        return spGS
+
+
+    @classmethod
+    def get_ori2cov(cls, i):
+        """
+        For a given path in the De-Bruijn Graph, calculate the fraction of its vertices that are contained in each input sequence
+        """
+        paths, seqPaths, bubble_vertex2origins = cls.get_multiprocessing_globals()
+        path = paths[i]
+        ori2cov = defaultdict(int)
+        for v in path:
+            for ori in cls.vertex2origins(v, seqPaths) | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
+                ori2cov[ori] += 1                                                  # but to bubbles that were originally in this path before we popped them
+        ori2cov   = {ori: prev/len(path) for ori, prev in ori2cov.items()}
+        return ori2cov
+
+    
+    @classmethod
+    def vertex2origins(cls, v, seqPaths):
+        """
+        Return the names of the input sequences that contain a given vertex in the De-Bruijn Graph
+        """
+        return {name for name, vs in seqPaths.items() if v in vs}
+
+
+    @classmethod
+    def vertex2originslen(cls, i):
+        """
+        Return the number of input sequences that contain a given vertex in the De-Bruijn Graph
+        """
+        vertices, seqPaths = cls.get_multiprocessing_globals()
+        return len(cls.vertex2origins(vertices[i], seqPaths))
+
+
+    @classmethod
+    def get_pathCov(cls, i):
+        """
+        Return the average coverage of a De-Bruijn Graph path
+        """
+        paths, seqPaths, bubble_vertex2origins = cls.get_multiprocessing_globals()
+        return np.mean([len(cls.vertex2origins(v, seqPaths) | bubble_vertex2origins[v]) for v in paths[i]])
+        
+
 
         
 

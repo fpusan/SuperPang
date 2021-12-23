@@ -3,3 +3,5 @@ pangTest.py
 build
 dist
 *egg-info
+SuperPang/lib/*c
+SuperPang/lib/*so
