@@ -7,7 +7,7 @@ from os.path import dirname, realpath
 from os import mkdir
 path = dirname(realpath(sys.argv[0]))
 sys.path.remove(path)
-sys.path.append(realpath(path + '/../..'))
+sys.path.insert(0, realpath(path + '/../..'))
 superpath = path + '/' + 'SuperPang.py'
 
 import SuperPang

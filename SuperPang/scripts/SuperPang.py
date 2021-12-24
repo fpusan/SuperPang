@@ -5,7 +5,7 @@ from os.path import dirname, realpath
 from os import mkdir
 path = dirname(realpath(sys.argv[0]))
 sys.path.remove(path)
-sys.path.append(realpath(path + '/../..'))
+sys.path.insert(0, realpath(path + '/../..'))
 
 try:
     import graph_tool
@@ -117,9 +117,13 @@ def main(args):
                 input_combined = input_minimap2
                 input_minimap2 = f'{input_minimap2}.{i}'
             
-            call([path + '/' + 'homogenize.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
-                  '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-n', str(args.correction_repeats_min), '-t', str(args.threads),
-                  '--minimap2-path', args.minimap2_path, '--silent'])
+            ecode = call([path + '/' + 'homogenize.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
+                          '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-n', str(args.correction_repeats_min), '-t', str(args.threads),
+                          '--minimap2-path', args.minimap2_path, '--silent'])
+            if ecode:
+                print('\nThere was an error running homogenize.py. Please open an issue\n')
+                sys,exit(1)
+                
         if args.keep_intermediate:
             outfiles = {bin_: open(f'{args.output_dir}/corrected_input/{bin_}.fasta', 'w') for bin_ in set(name2bin.values())}
             for name, seq in read_fasta(input_minimap2).items():

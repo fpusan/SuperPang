@@ -4,7 +4,7 @@ import sys
 from os.path import dirname, realpath
 path = dirname(realpath(sys.argv[0]))
 sys.path.remove(path)
-sys.path.append(realpath(path + '/../..'))
+sys.path.insert(0, realpath(path + '/../..'))
 
 from SuperPang.lib.utils import read_fasta, write_fasta
 

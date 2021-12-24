@@ -4,13 +4,13 @@ import sys
 from os.path import dirname, realpath
 path = dirname(realpath(sys.argv[0]))
 sys.path.remove(path)
-sys.path.append(realpath(path + '/../..'))
+sys.path.insert(0, realpath(path + '/../..'))
 
-from SuperPang.lib.utils import read_fastq, fasta2fastq, fastq2fasta, fasta2fastq, reverse_complement, print_time
+from SuperPang.lib.utils import read_fastq, write_fastq, fasta2fastq, fastq2fasta, reverse_complement, print_time
 
 from argparse import ArgumentParser
 
-import numpy as np
+from collections import defaultdict
 from subprocess import call, DEVNULL
 import re
 
@@ -20,20 +20,17 @@ def main(args):
     assert args.fasta != args.output
     prefix = args.output.rsplit('.', 1)[0].split('/')[-1]
     current1 = '/tmp/' + prefix + '.current1.fastq'
-    paf = '/tmp/' + prefix + '.current.paf'
     current2 = '/tmp/' + prefix + '.current2.fastq'
     fasta2fastq(args.fasta, current1)
     corrected = {}
     rounds = 0
 
     print_time('Correcting input sequences with minimap2')
-    print_time('round\t#corrected\tmLen\toLen\tsim\terrors')
+    print_time('round\t#corrected\tmismatches\tindels\terrors')
     while True:
         rounds += 1
-        #call([args.minimap2_path, '-x', 'asm20', '-f', '100', current1, current1, '-t', str(args.threads), '-c', '--eqx', '-L'], stdout=open(paf, 'w'), stderr = DEVNULL if args.silent else None)
-        call([args.minimap2_path, '-x', 'ava-pb', '-f', '100', current1, current1, '-t', str(args.threads), '-c', '--eqx', '-L'], stdout=open(paf, 'w'), stderr = DEVNULL if args.silent else None)
-        mLen, oLen, corrected_thisround, nErrors = iterate(current1, paf, current2, corrected, identity_threshold = args.identity_threshold, mismatch_size_threshold = args.mismatch_size_threshold, indel_size_threshold = args.indel_size_threshold)
-        print_time('\t'.join(map(str, [rounds, len(corrected_thisround), mLen, oLen, round(mLen/oLen, 4), nErrors])))
+        mLen, iLen, oLen, corrected_thisround, nErrors = iterate(args, rounds, prefix, current1, current2, corrected, identity_threshold = args.identity_threshold, mismatch_size_threshold = args.mismatch_size_threshold, indel_size_threshold = args.indel_size_threshold)
+        print_time('\t'.join(map(str, [rounds, len(corrected_thisround), iLen-mLen, oLen-iLen, nErrors])))
         for b in corrected_thisround:
             if b not in corrected:
                 corrected[b] = set()
@@ -47,137 +44,172 @@ def main(args):
         if rounds == args.correction_repeats:
             break
     fastq2fasta(current1, args.output)
-            
-        
-        
-    
-def iterate(infastq, paf, outfastq, corrected_previously, identity_threshold, mismatch_size_threshold, indel_size_threshold):
 
-    corrected_thisround = {}
-    
+
+def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, identity_threshold, mismatch_size_threshold, indel_size_threshold):
+
     seqOrderOriginal = []
     seqs = read_fastq(infastq)
-    minimusNameConversion = {}
-        
     seqOrderOriginal = list(seqs.keys()) # trust that dict remembers insertion order
-
-    for name in seqOrderOriginal: # since minimus2 removes everything after the first space
-        newName = name.split(' ')[0]
-        assert newName not in minimusNameConversion # make sure that names are still different. If not, kill ourselves and blame society
-        minimusNameConversion[newName] = name
-
-            
     sortedSeqs = list(sorted(seqs, key = lambda a: len(seqs[a]), reverse = True))
+    lexi = list(sorted((f'{i}' for i in range(len(sortedSeqs))), reverse = True))
+    ori2minimap = {name: lexi[i] for i, name in enumerate(sortedSeqs)} # with "--dual=no" minimap2 will skip query-target pairs wherein the query name
+    minimap2ori = {mm: name for name, mm in ori2minimap.items()}       #  is lexicographically greater than the target name.
 
     mLen = 0
+    iLen = 0
     oLen = 0
-    overlaps = {}
-    for line in open(paf):
-        # positions are zero indexed, start pos is closed, end pos is open
-        query, queryLen, queryStart, queryEnd, isRC, target, targetLen, targetStart, targetEnd, matches, alignLen, qual, *_, cigar = line.strip().split('\t')
-        if query == target:
-            continue
-        query, target = minimusNameConversion[query], minimusNameConversion[target]
-        queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual = map(int, [queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual])
-        isRC = isRC == '-'
-        cigar = cigar.replace('cg:Z:','')
-        cigar = re.split('(\d+)',cigar)[1:]
-        cigar = [(int(cigar[i]), cigar[i+1]) for i in range(0, len(cigar), 2)]
-        mLen += matches
-        oLen += alignLen
 
-        if len(cigar) == 1 and cigar[0][1] == '=':
-            continue # perfect match, ignore
-
-        if sum([L for L, op in cigar if op == '=']) / sum([L for L, op in cigar if op in {'=', 'X'}]) < identity_threshold:
-            continue # too many mismatches, ignore (indels are not counted here)
-
-        if targetLen >= queryLen:
-            if target not in overlaps:
-                overlaps[target] = {}
-            if query not in overlaps[target]:
-                overlaps[target][query] = list()
-            overlaps[target][query].append( ( queryStart, queryEnd, targetStart, targetEnd, cigar, isRC) )
-        elif queryLen > targetLen:
-            if query not in overlaps:
-                overlaps[query] = {}
-            if target not in overlaps[query]:
-                overlaps[query][target] = list()
-            overlaps[query][target].append( ( targetStart, targetEnd, queryStart, queryEnd, switch_cigar(cigar) if not isRC else switch_cigar(cigar)[::-1], isRC) )
-        else:
-            pass # do something different if lenghts are equal????
-    
     correctedSeqs = {}
+    corrected_thisround = {}
     nErrors = 0
-    # query is the sequence we want to correct, target is the template
-    for target in sortedSeqs: # go from the longest target to the shortest
-        if target not in overlaps: # if it doesn't overlap, go on
-            continue
-        if target in correctedSeqs: # if this target was corrected by a longer sequence, go on
-            continue
-        for query, ols in overlaps[target].items():
-            # Check whether we can make this correction
-            if query in correctedSeqs: # if this query was already corrected by a longer sequence in this round, go on
-                continue
-            if query in corrected_previously:
-                if target in corrected_previously[query]: # if this query was already corrected by this target in a previous round, go on
-                    continue
-##                if a in corrected_previously:
-##                    if corrected_previously[query] & corrected_previously[target]: # if both were corrected by the same target in a previous round, go on
-##                        continue
-            assert query not in correctedSeqs and query not in corrected_thisround
 
-            # Ensure that the different regions to correct do not overlap
-            fullCorrection = True
-            ols = sorted(ols, key = lambda x: x[0]) # sort by query start
-            lastEnd = -1
-            goodOls = []
-            for queryStart, queryEnd, targetStart, targetEnd, cigar, isRC in ols:
-                if queryStart > lastEnd:
-                    goodOls.append( (queryStart, queryEnd, targetStart, targetEnd, cigar, isRC) )
+    tfile   = '/tmp/' + prefix + '.t.fastq'
+    mmifile = '/tmp/' + prefix + '.t.mmi'
+    qfile   = '/tmp/' + prefix + '.q.fastq'
+    paf     = '/tmp/' + prefix + '.temp.paf'
+
+    querybuf = set()
+    targetbuf= []
+
+    for i, target0 in enumerate(sortedSeqs):
+        
+        if target0 in corrected_thisround or target0 in correctedSeqs:
+            continue
+
+        for query0 in sortedSeqs[i+1:]:
+            if query0 in corrected_previously and target0 in corrected_previously[query0]:
+                continue
+            if query0 in correctedSeqs or query0 in corrected_thisround:
+                continue
+            querybuf.add(query0)
+
+        if not querybuf:
+            continue
+        
+        targetbuf.append(target0)
+
+        if len(targetbuf) * len(querybuf) < 1000000 and i+1 < len(sortedSeqs):
+            continue
+
+        queries = [n for n in sortedSeqs if n in querybuf]
+        targets = [n for n in targetbuf]
+        querybuf  = set()
+        targetbuf = []
+
+        print_time(f'{rounds}\t{i+1}/{len(sortedSeqs)}', end = '\r')
+
+        write_fastq({ori2minimap[target0]: seqs[target0] for target0 in targets}, tfile)
+        write_fastq({ori2minimap[query0]:  seqs[query0]  for query0  in queries}, qfile)
+        ecode = call([args.minimap2_path, '-Hk19', '-w5', '-e0', '-m100', '-f100', '--rmq=yes', '--dual=no', '-DP', '--no-long-join', '-U50,500', '-g10k', '-s200',
+                      tfile, qfile, '-t', str(args.threads), '-c', '--eqx', '-L'],
+                      stdout=open(paf, 'w'), stderr = DEVNULL if args.silent else None)
+        if ecode:
+            print('\nError running minimap2\n')
+            sys.exit(1)
+
+        overlaps = {target0: defaultdict(list) for target0 in targets}
+
+        for line in open(paf):
+            # positions are zero indexed, start pos is closed, end pos is open
+            query, queryLen, queryStart, queryEnd, isRC, target, targetLen, targetStart, targetEnd, matches, alignLen, qual, *_, cigar = line.strip().split('\t')
+            query, target = minimap2ori[query], minimap2ori[target]
+            if query == target:
+                continue
+            if query in corrected_thisround or query in correctedSeqs:
+                continue
+            if query in corrected_previously and target in corrected_previously[query]:
+                continue
+
+            queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual = map(int, [queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual])
+            isRC = isRC == '-'
+            cigar = cigar.replace('cg:Z:','')
+            cigar = re.split('(\d+)',cigar)[1:]
+            cigar = [(int(cigar[i]), cigar[i+1]) for i in range(0, len(cigar), 2)]
+            idlen = sum([L for L, op in cigar if op in {'=', 'X'}])
+
+            if len(cigar) == 1 and cigar[0][1] == '=':
+                continue # perfect match, ignore
+
+            if sum([L for L, op in cigar if op == '=']) / idlen < identity_threshold:
+                continue # too many mismatches, ignore (indels are not counted here)
+
+            assert targetLen >= queryLen
+
+            overlaps[target][query].append( ( queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen) )
+        
+        # query is the sequence we want to correct, target is the template
+        # before we were using target0 and query0, but the code should work even if we kept using query and target as variable names
+        for target in targets:
+            if target in corrected_thisround or target in correctedSeqs:
+                continue
+            for query, ols in overlaps[target].items():
+                # Check whether we can make this correction
+                if query in correctedSeqs or query in corrected_thisround:
+                    continue
+                if query in corrected_previously:
+                    assert target not in corrected_previously[query]
+
+                #print(ori2minimap[target], ori2minimap[query], len(ols)) ####################
+                # Ensure that the different regions to correct do not overlap
+                fullCorrection = True
+                ols = sorted(ols, key = lambda x: x[0]) # sort by query start
+                lastEnd = -1
+                goodOls = []
+                for queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen in ols:
+                    if queryStart > lastEnd:
+                        goodOls.append( (queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen) )
+                        lastEnd = queryEnd
+                    else:
+                        fullCorrection = False
+
+                # Double-check
+                lastEnd = -1
+                for queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen in goodOls:
+                    assert queryStart > lastEnd
                     lastEnd = queryEnd
-                else:
-                    fullCorrection = False
-                    
-            # Double-check
-            lastEnd = -1
-            for queryStart, queryEnd, targetStart, targetEnd, cigar, isRC in goodOls:
-                assert queryStart > lastEnd
-                lastEnd = queryEnd
-            # Correct
-            try:
-                correctedSeq = []
-                lastEnd = 0
-                for  queryStart, queryEnd, targetStart, targetEnd, cigar, isRC in goodOls:
-                    correctedSeq.append(seqs[query][lastEnd:queryStart])
-                    correctedSeq.append( correct_query(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
-                                                       cigar = cigar, isRC = isRC, mismatch_size_threshold = mismatch_size_threshold, indel_size_threshold =indel_size_threshold)
-                                         )
-                    lastEnd = queryEnd
-                correctedSeq.append( seqs[query][lastEnd:-1] )
-                
-                correctedSeqs[query] = ''.join(correctedSeq)
-                if fullCorrection:
-                    corrected_thisround[query] = {target}
-            except AssertionError: # we failed some assertion in correct_query. I checked a case and it was actually because the alignment/CIGAR string generated by minimap2 was wrong
-                nErrors += 1        # so we just ignore this correction completely
-                
+        
+                    mLen += matches
+                    iLen += idlen
+                    oLen += alignLen
+
+                # Correct
+                try:
+                    correctedSeq = []
+                    lastEnd = 0
+                    for  queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen in goodOls:
+                        correctedSeq.append(seqs[query][lastEnd:queryStart])
+                        correctedSeq.append( correct_query(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
+                                                           cigar = cigar, isRC = isRC, mismatch_size_threshold = mismatch_size_threshold, indel_size_threshold = indel_size_threshold)
+                                           )
+                        lastEnd = queryEnd
+                    correctedSeq.append( seqs[query][lastEnd:-1] )
+
+                    correctedSeqs[query] = ''.join(correctedSeq)
+                    if fullCorrection:
+                        corrected_thisround[query] = {target}
+
+                except AssertionError: # we failed some assertion in correct_query. I checked a case and it was actually because the alignment/CIGAR string generated by minimap2 was wrong
+                    nErrors += 1        # so we just ignore this correction completely
+
 
     for header in seqs:
         if header not in correctedSeqs:
             correctedSeqs[header] = seqs[header]
 
-                
     with open(outfastq, 'w') as outfile:
         for header in seqOrderOriginal:
             seq = correctedSeqs[header]
             quals = 'I'*len(seq)
             outfile.write(f'@{header}\n{seq}\n+\n{quals}\n')
 
-    return mLen, oLen, corrected_thisround, nErrors
+    print_time(' '*40, end = '\r')
+    
+    return mLen, iLen, oLen, corrected_thisround, nErrors
 
 
-def switch_cigar(cigar):
+
+def switch_cigar(cigar): # unused
     newCigar = []
     for L, op in cigar:
         if op == 'D':
@@ -241,11 +273,6 @@ def correct_query(query, queryStart, queryEnd, target, targetStart, targetEnd, c
         correction = reverse_complement(correction)
 
     return correction
-
-
-
-
-
 
 
 

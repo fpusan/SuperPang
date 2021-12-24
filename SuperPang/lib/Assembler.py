@@ -74,7 +74,8 @@ class Assembler:
 
         ### Read input sequences
         print_time(f'Reading sequences')
-        self.seqDict = read_fasta(fasta, Ns = 'split')     
+        self.seqDict = read_fasta(fasta, Ns = 'split')
+        nNs = len({name.split('_Nsplit_')[0] for name in self.seqDict})
 
         ### Kmer hashing related parameters
         self.compressor = Compressor(self.ksize)
@@ -83,7 +84,7 @@ class Assembler:
         maxnkmers = maxseqlength-self.ksize+1                     # number of kmers in the largest input sequence
 
         ### Get kmers from sequences and create DBG
-        print_time(f'Creating DBG from {len(self.seqDict)} sequences')
+        print_time(f'Creating DBG from {len(self.seqDict)} sequences ({nNs} originals)')
         edges = set()
         totalSize = sum(len(seq) for seq in self.seqDict.values())
         elapsedSize = 0
@@ -102,6 +103,7 @@ class Assembler:
             hashMem    = smm.SharedMemory(size=clength*maxnkmers)
             revhashMem = smm.SharedMemory(size=clength*maxnkmers)
             self.set_multiprocessing_globals(seqMem, rcSeqMem, hashMem, revhashMem, self.ksize, clength, self.compressor)
+
             with Pool(threads) as pool:
             
                 for name, seq in self.seqDict.items():
@@ -524,13 +526,14 @@ class Assembler:
                     print_time(msg)
                     continue
 
-                # Compute scaffold coverage
-                scaffoldCov = np.mean(self.multimap(self.vertex2originslen, threads, [v for p in paths for v in p], self.seqPaths, single_thread_threshold = 10000))
-                msg += f', cov {round(scaffoldCov, 2)}'
-                if mincov and scaffoldCov < mincov:
-                    msg += ' (< mincov, IGNORED)'
-                    print_time(msg)
-                    continue
+                if mincov:
+                    # Compute scaffold coverage
+                    scaffoldCov = np.mean(self.multimap(self.vertex2originslen, threads, [v for p in paths for v in p], self.seqPaths, single_thread_threshold = 10000))
+                    msg += f', cov {round(scaffoldCov, 2)}'
+                    if mincov and scaffoldCov < mincov:
+                        msg += ' (< mincov, IGNORED)'
+                        print_time(msg)
+                        continue
                 
                 print_time(msg, end='\r')
                 
@@ -691,23 +694,25 @@ class Assembler:
                     
                 path2id  = {p: (scaffold, i) for i, p in enumerate(paths)}
                 ori2covs = self.multimap(self.get_ori2cov, threads, trimmedPaths, self.seqPaths, bubble_vertex2origins) # Using trimmedPaths: don't take into account overlaps with other paths for mean cov calculation and origin reporting
-                pathCovs = self.multimap(self.get_pathCov, threads, trimmedPaths, self.seqPaths, bubble_vertex2origins)
+                #pathCovs = self.multimap(self.get_pathCov, threads, trimmedPaths, self.seqPaths, bubble_vertex2origins)
 
-                for p, ori2cov, pathCov, tseq in zip(paths, ori2covs, pathCovs, trimmedSeqs):
+                for p, tp, ori2cov, tseq in zip(paths, trimmedPaths, ori2covs, trimmedSeqs):
                     assert p not in addedPaths
                     id_ = path2id[p]
                     # Even for complete genomes, we can have non-branching paths that belong to the core but don't have full coverage in some sequences
                     # This can happen if there are missing bases at the beginning or end of some of the input sequences (contigs in the original assemblies)
                     # So there is no branching, but some are missing
-                    goodOris  = {ori for ori, cov in ori2cov.items() if cov >= genome_assignment_threshold}
-                    goodOris.add( list(sorted(ori2cov, key = lambda ori: ori2cov[ori], reverse = True))[0] ) # add at least the origin with the highest cov
+                    avgcov = sum(ori2cov.values())/len(tp)
+                    ori2covNorm = {ori: cov/len(tp) for ori, cov in ori2cov.items()}
+                    goodOris = {ori for ori, covN in ori2covNorm.items() if covN >= genome_assignment_threshold}
+                    goodOris.add( list(sorted(ori2covNorm, key = lambda ori: ori2covNorm[ori], reverse = True))[0] ) # add at least the origin with the highest cov
                     goodOris = {ori.split('_Nsplit_')[0] for ori in goodOris}
                     # Go on
                     contigs[id_] = Contig(scaffold   = id_[0],
                                           i          = id_[1],
                                           seq        = path2seq[p],
                                           tseq       = tseq,
-                                          cov        = pathCov,
+                                          cov        = avgcov,
                                           origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     addedPaths.add(p)
@@ -833,7 +838,7 @@ class Assembler:
         for v in path:
             for ori in cls.vertex2origins(v, seqPaths) | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
                 ori2cov[ori] += 1                                                  # but to bubbles that were originally in this path before we popped them
-        ori2cov   = {ori: prev/len(path) for ori, prev in ori2cov.items()}
+        #ori2cov   = {ori: prev/len(path) for ori, prev in ori2cov.items()}
         return ori2cov
 
     
@@ -855,7 +860,7 @@ class Assembler:
 
 
     @classmethod
-    def get_pathCov(cls, i):
+    def get_pathCovREMOVE(cls, i):
         """
         Return the average coverage of a De-Bruijn Graph path
         """
