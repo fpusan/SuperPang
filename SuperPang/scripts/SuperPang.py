@@ -89,7 +89,7 @@ def main(args):
     name2bin = {}
     seqDict = {}
     for f in args.fasta:
-        bin_ = f.rsplit('/',1)[1].rsplit('.',1)[0]
+        bin_ = f.rsplit('/',1)[1].rsplit('.',1)[0] if '/' in f else f.rsplit('.',1)[0]
         for name, seq in read_fasta(f).items():
             if name in seqDict:
                 #raise Exception(f'Sequence "{name}" is duplicated in your input files')
