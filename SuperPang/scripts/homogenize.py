@@ -71,6 +71,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, ident
 
     querybuf = set()
     targetbuf= []
+    fLen = sum(len(s) for s in seqs.values())
 
     for i, target0 in enumerate(sortedSeqs):
         
@@ -89,7 +90,12 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, ident
         
         targetbuf.append(target0)
 
-        if len(targetbuf) * len(querybuf) < 1000000 and i+1 < len(sortedSeqs):
+        tLen = sum(len(seqs[target]) for target in targetbuf)
+        qLen = sum(len(seqs[query]) for query in querybuf)
+
+        if tLen * qLen < 200 * fLen * len(seqs) and i+1 < len(sortedSeqs):
+        #if qLen < len(seqs):
+        #if len(targetbuf) * len(querybuf) < 1000000 and i+1 < len(sortedSeqs):
             continue
 
         queries = [n for n in sortedSeqs if n in querybuf]
@@ -101,7 +107,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, ident
 
         write_fastq({ori2minimap[target0]: seqs[target0] for target0 in targets}, tfile)
         write_fastq({ori2minimap[query0]:  seqs[query0]  for query0  in queries}, qfile)
-        ecode = call([args.minimap2_path, '-Hk19', '-w5', '-e0', '-m100', '-f100', '--rmq=yes', '--dual=no', '-DP', '--no-long-join', '-U50,500', '-g10k', '-s200',
+        ecode = call([args.minimap2_path, '-Hk19', '-w5', '-e0', '-m100', '--rmq=yes', '--dual=no', '-DP', '--no-long-join', '-U50,500', '-g10k', '-s200',
                       tfile, qfile, '-t', str(args.threads), '-c', '--eqx', '-L'],
                       stdout=open(paf, 'w'), stderr = DEVNULL if args.silent else None)
         if ecode:
@@ -109,6 +115,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, ident
             sys.exit(1)
 
         overlaps = {target0: defaultdict(list) for target0 in targets}
+        bestCorr = {}
 
         for line in open(paf):
             # positions are zero indexed, start pos is closed, end pos is open
@@ -122,6 +129,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, ident
                 continue
 
             queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual = map(int, [queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual])
+                
             isRC = isRC == '-'
             cigar = cigar.replace('cg:Z:','')
             cigar = re.split('(\d+)',cigar)[1:]

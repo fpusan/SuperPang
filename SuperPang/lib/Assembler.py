@@ -7,7 +7,7 @@ from functools import partial
 import numpy as np
 from scipy.sparse import lil_matrix, csr_matrix
 
-from SuperPang.lib.utils import read_fasta, reverse_complement, print_time
+from SuperPang.lib.utils import read_fasta, write_fasta, reverse_complement, print_time
 from SuperPang.lib.Compressor import Compressor
 
 import graph_tool as gt
@@ -151,7 +151,7 @@ class Assembler:
                                 edges.add( (v, prev) )
                             prev = v
                                 
-                        self.seqPaths[name] = sp    
+                        self.seqPaths[name] = sp
                                                 
                         if elapsedSize - lastSize > totalSize/100:
                             print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {len(self.hash2vertex)} vertices, {len(edges)} edges         ', end = '\r')
@@ -160,6 +160,10 @@ class Assembler:
         self.G = Graph()
         self.G.add_edge_list(edges)
         print_time(f'\t100% bases added, {self.G.num_vertices()} vertices, {self.G.num_edges()} edges         ')
+        n2m = {n: f'seq{i}' for i, n in enumerate(self.seqDict)}
+        self.m2n = {m: n for n, m in n2m.items()}
+        #write_fasta({n2m[n]: self.seqDict[n] for n in self.seqDict}, fasta + '.parsed.fasta')
+        #self.ref = Aligner(fn_idx_in = fasta + '.parsed.fasta', n_threads = 3)
 
         
 
@@ -172,6 +176,7 @@ class Assembler:
         Contig = namedtuple('Contig', ['scaffold', 'i', 'seq', 'tseq', 'cov', 'origins', 'successors'])
         contigs = {}
         addedPaths = set()
+        addedSeqs = set()
 
         ### Identify connected components
         print_time('Identifying connected components')
@@ -183,7 +188,16 @@ class Assembler:
 
         ### Process connected components
         for c, vs in comp2vertices.items():
+            
             print_time(f'Working on comp {c+1}/{len(comp2vertices)}')
+            
+            addedSeqs_thiscomponent = set() # store the sequences overlapping with our paths here
+                                            #  when we finish processing the DBG component we will
+                                            #  use this to update addedSeqs
+            # Get the seqPaths that were not overlapping with previous DBG components
+            #  assuming that the same sequence can't overlap in two different DBG graph components
+            seqPathsRemaining = {name: vs for name, vs in self.seqPaths.items() if name not in addedSeqs}
+
             ### Reconstruct non-branching paths
             print_time('\tCollecting non-branching paths')
             paths = []
@@ -317,7 +331,7 @@ class Assembler:
                     assert vertex2path[vS1] == vertex2path[vS2][::-1]
 
                 # Map the input sequences to nodes in the sequence graph (in the original orientation of the input sequence)
-                names = list(self.seqPaths.keys())
+                names = list(seqPathsRemaining.keys())
                 seqPathsGS = dict(zip(names, self.multimap(self.get_seqPathsGS, 24, names, self.seqPaths, psets, path2seq, vertex2path, self.seqDict)))
                 seqPathsGS = {name: spGSs for name, spGSs in seqPathsGS.items() if spGSs}
 
@@ -528,7 +542,7 @@ class Assembler:
 
                 if mincov:
                     # Compute scaffold coverage
-                    scaffoldCov = np.mean(self.multimap(self.vertex2originslen, threads, [v for p in paths for v in p], self.seqPaths, single_thread_threshold = 10000))
+                    scaffoldCov = np.mean(self.multimap(self.vertex2originslen, threads, [v for p in paths for v in p], seqPathsRemaining, single_thread_threshold = 10000))
                     msg += f', cov {round(scaffoldCov, 2)}'
                     if mincov and scaffoldCov < mincov:
                         msg += ' (< mincov, IGNORED)'
@@ -558,7 +572,7 @@ class Assembler:
                                 if al.mlen/al.blen >= bubble_identity_threshold: 
                                     bubble_paths.add(p2)  
                                     m1 += 1
-                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins(v2, self.seqPaths)} )
+                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins(v2, seqPathsRemaining)} )
                             for v1 in p1:
                                 bubble_vertex2origins[v1].update(newOris) # count vertices in p1 as appearing in all of the origins in the bubble paths that we just discarded
                                     
@@ -650,7 +664,7 @@ class Assembler:
                 
 
                 # By default we'll trim overlaps at 3', but we make exceptions
-                # The idea is to remove also overlaps between to sequences sharing the same predecessor
+                # The idea is to remove also overlaps between two sequences sharing the same predecessor
                 trim_left  = set()
                 keep_right = set()
                 for p in paths:
@@ -693,19 +707,21 @@ class Assembler:
                 # Update global results
                     
                 path2id  = {p: (scaffold, i) for i, p in enumerate(paths)}
-                ori2covs = self.multimap(self.get_ori2cov, threads, trimmedPaths, self.seqPaths, bubble_vertex2origins) # Using trimmedPaths: don't take into account overlaps with other paths for mean cov calculation and origin reporting
-                #pathCovs = self.multimap(self.get_pathCov, threads, trimmedPaths, self.seqPaths, bubble_vertex2origins)
+                ori2covs = self.multimap(self.get_ori2cov, threads, trimmedPaths, seqPathsRemaining, bubble_vertex2origins)
+                # Using trimmedPaths/trimmedSeqs: don't take into account overlaps with other paths for mean cov calculation and origin reporting
+                #ori2covs = self.multimap(self.get_ori2cov, threads, trimmedSeqs, self.m2n, self.ref) 
+                
+                foundOris = set()
 
-                for p, tp, ori2cov, tseq in zip(paths, trimmedPaths, ori2covs, trimmedSeqs):
+                for p, ori2cov, tseq in zip(paths, ori2covs, trimmedSeqs):
                     assert p not in addedPaths
                     id_ = path2id[p]
                     # Even for complete genomes, we can have non-branching paths that belong to the core but don't have full coverage in some sequences
                     # This can happen if there are missing bases at the beginning or end of some of the input sequences (contigs in the original assemblies)
                     # So there is no branching, but some are missing
-                    avgcov = sum(ori2cov.values())/len(tp)
-                    ori2covNorm = {ori: cov/len(tp) for ori, cov in ori2cov.items()}
-                    goodOris = {ori for ori, covN in ori2covNorm.items() if covN >= genome_assignment_threshold}
-                    goodOris.add( list(sorted(ori2covNorm, key = lambda ori: ori2covNorm[ori], reverse = True))[0] ) # add at least the origin with the highest cov
+                    avgcov = sum(ori2cov.values())
+                    goodOris = {ori for ori, cov in ori2cov.items() if cov >= genome_assignment_threshold}
+                    goodOris.add( list(sorted(ori2cov, key = lambda ori: ori2cov[ori], reverse = True))[0] ) # add at least the origin with the highest cov
                     goodOris = {ori.split('_Nsplit_')[0] for ori in goodOris}
                     # Go on
                     contigs[id_] = Contig(scaffold   = id_[0],
@@ -716,11 +732,15 @@ class Assembler:
                                           origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     addedPaths.add(p)
+                    for ori in ori2cov:
+                        addedSeqs_thiscomponent.add(ori)
 
                 msg += ', done'
                 print_time(msg)
 
-                    
+            # Wait until we have finished processing a whole DBG component for this
+            addedSeqs.update(addedSeqs_thiscomponent)
+
         ### Finished!
         return contigs
 
@@ -828,6 +848,21 @@ class Assembler:
 
 
     @classmethod
+    def seqInVerticesiREMOVE(cls, i):
+        """
+        Return whether a sequence shares at least one vertex with a set of vertices
+        """
+        seqs, seqPaths, vertices = cls.get_multiprocessing_globals()
+        seq = seqs[i]
+        res = False
+        for v in seqPaths[seq]:
+            if v in vertices:
+                res = True
+            break
+        return res
+
+
+    @classmethod
     def get_ori2cov(cls, i):
         """
         For a given path in the De-Bruijn Graph, calculate the fraction of its vertices that are contained in each input sequence
@@ -837,17 +872,27 @@ class Assembler:
         ori2cov = defaultdict(int)
         for v in path:
             for ori in cls.vertex2origins(v, seqPaths) | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
-                ori2cov[ori] += 1                                                  # but to bubbles that were originally in this path before we popped them
-        #ori2cov   = {ori: prev/len(path) for ori, prev in ori2cov.items()}
-        return ori2cov
+                ori2cov[ori] += 1                                                         # but to bubbles that were originally in this path before we popped them
+        return {ori: cov/len(path) for ori, cov in ori2cov.items()}
 
-    
+
+    @classmethod
+    def get_ori2covN(cls, i):
+        """
+        For a given sequence, calculate the fraction that is contained in each input sequence
+        """
+        seqs, m2n, ref = cls.get_multiprocessing_globals()
+        seq = seqs[i]
+        return {m2n[align.ctg]: align.mlen / len(seq) for align in ref.map(seq)}
+        
+
     @classmethod
     def vertex2origins(cls, v, seqPaths):
         """
         Return the names of the input sequences that contain a given vertex in the De-Bruijn Graph
         """
-        return {name for name, vs in seqPaths.items() if v in vs}
+        return {name for name in seqPaths if v in seqPaths[name]}
+
 
 
     @classmethod
@@ -858,15 +903,6 @@ class Assembler:
         vertices, seqPaths = cls.get_multiprocessing_globals()
         return len(cls.vertex2origins(vertices[i], seqPaths))
 
-
-    @classmethod
-    def get_pathCovREMOVE(cls, i):
-        """
-        Return the average coverage of a De-Bruijn Graph path
-        """
-        paths, seqPaths, bubble_vertex2origins = cls.get_multiprocessing_globals()
-        return np.mean([len(cls.vertex2origins(v, seqPaths) | bubble_vertex2origins[v]) for v in paths[i]])
-        
 
 
         

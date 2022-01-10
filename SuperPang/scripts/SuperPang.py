@@ -15,7 +15,7 @@ except ModuleNotFoundError:
 
 
 from SuperPang.lib.Assembler import Assembler
-from SuperPang.lib.utils import read_fasta, write_fasta
+from SuperPang.lib.utils import read_fasta, write_fasta, print_time
 from mOTUlizer.classes.mOTU import mOTU
 from mOTUlizer.utils import parse_checkm
 
@@ -43,7 +43,7 @@ def main(args):
     outputAux            = args.output_dir + '/auxiliary.fasta'
     outputNode2origs     = args.output_dir + '/node2origins.tsv'
     outputEdges          = args.output_dir + '/graph.fastg'
-    output               = args.output_dir + '/assembly.fasta'
+    outputName           = args.output_dir + '/assembly'
 
 
     ### Get sha1 of SuperPang scripts
@@ -147,6 +147,7 @@ def main(args):
 
 
     ### Tag contigs with mOTUpan
+    print_time('Running mOTUpan')
     id2tag = {}
     if len(set(name2bin.values())) == 1: # only one bin, treat everything as core (we should use a different tag, print a warning and don't output the *.core.fasta
         for id_ in contigs:
@@ -166,7 +167,7 @@ def main(args):
         for name, bin_ in name2bin.items():
             featDict[bin_].update(name2ids[name])
         
-        motu = mOTU( name = "mOTUpan_core_prediction" , faas = {} , cog_dict = featDict, checkm_dict = completeness, max_it = 100, threads = args.threads, precluster = False, method = 'default')
+        motu = mOTU( name = "mOTUpan_core_prediction" , faas = {} , cog_dict = featDict, checkm_dict = completeness, max_it = 100, threads = args.threads, precluster = False, method = 'default', quiet = True)
         if motu.get_stats()['mOTUpan_core_prediction']['core']:
             for id_ in motu.get_stats()['mOTUpan_core_prediction']['core']:
                 id2tag[id_] = 'core'
@@ -203,23 +204,30 @@ def main(args):
         succs = f':{succs}' if succs else ''
         assemblyEdges[f'{edgeNames[id_]}{succs};'] = contig.seq
 
+        
     ### Write final node, edge and core output
     write_fasta( assemblyNodes,     outputNodes )
     write_fasta( assemblyNodesCore, outputCore  )
     write_fasta( assemblyNodesAux,  outputAux   )
     write_fasta( assemblyEdges,     outputEdges )
+    
     with open(outputNode2origs, 'w') as outfile:
         for id_, contig in contigs.items():
             origs = ','.join(contig.origins)
             outfile.write(f'{nodeNames[id_]}\t{origs}\n')
 
     ### Condense edges
-    call([path + '/' + 'condense-edges.py', outputEdges, output, str(args.ksize)])
+    print_time('Reconstructing contigs')
+    ecode = call([path + '/' + 'condense-edges.py', outputEdges, outputName, str(args.ksize)])
+    if ecode:
+        print('\nThere was an error running condense-edges.py. Please open an issue\n')
+        sys,exit(1)
 
     ### Cleanup
     call(['rm', input_combined])
     if correct:
         call(['rm', input_minimap2])
+    print_time('Finished')
 
 
 def parse_args():

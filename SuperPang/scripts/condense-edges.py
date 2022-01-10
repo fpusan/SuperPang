@@ -15,8 +15,8 @@ from graph_tool.all import Graph
 
 def main():
 
-    infasta, outfasta, ksize, minlen = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(200)
-    outinfo = outfasta.rsplit('.',1)[0] + '.info.tsv'
+    infasta, outname, ksize, minlen = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(200)
+##    outinfo = outfasta.rsplit('.',1)[0] + '.info.tsv'
 
     name2id  = {}
     name2covLen = {}
@@ -69,6 +69,7 @@ def main():
     addedNodes = set()
     
     newSeqs = {}
+    newCore = {}
 
 ##    sources = {n for n in name2vertex if not predecessors[n]}
 ##    sinks = {n for n in name2vertex if not successors[n]}
@@ -83,7 +84,7 @@ def main():
 ##                best = (sink, l)
 ##        print(source, best[0], best[1])
 
-    with open(outinfo, 'w') as outfile:
+    with open(outname + '.info.tsv', 'w') as outfile:
         outfile.write('id\tregions\tpath\ttrim\n')
         while True:
             origins = sorted({n for n in name2id if not predecessors[n] and n not in addedNodes}, key = lambda n: name2covLen[n], reverse = True)
@@ -166,13 +167,21 @@ def main():
                             last = None
                             lastStart = 0
                             tagsStr = []
+                            coreAdded = 0
                             for pos in sorted(tagDict):
                                 tag = tagDict[pos]
                                 if tag != last:
                                     if last:
                                         tagsStr.append(f'({lastStart},{pos-1},{last})')
+                                        if last == 'core':
+                                            coreSeq = seq[lastStart-1:pos-1]
+                                            newCore[f'SUPERPANG_{len(newSeqs)}-core-{coreAdded}_length={len(coreSeq)}'] = coreSeq
+                                            coreAdded += 1
                                     lastStart = pos
                                     last = tag
+                            if last == 'core':
+                                coreSeq = seq[lastStart-1:pos-1]
+                                newCore[f'SUPERPANG_{len(newSeqs)}-core-{coreAdded}_length={len(coreSeq)}'] = coreSeq
                             tagsStr.append(f'({lastStart},{len(tagDict)},{last})')
                             tagsStr = '[{}]'.format(','.join(tagsStr))
                             if not trim_left and not trim_right:
@@ -210,7 +219,8 @@ def main():
 
     assert len(addedNodes) == len(name2id)
 
-    write_fasta(newSeqs, outfasta)
+    write_fasta(newSeqs, outname + '.fasta')
+    write_fasta(newCore, outname + '.core.fasta')
 
 
 def G2dicts(GS, name2vertex, vertex2name):
