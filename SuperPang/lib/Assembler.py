@@ -5,7 +5,6 @@ from multiprocessing.managers import SharedMemoryManager
 from functools import partial
 
 import numpy as np
-from scipy.sparse import lil_matrix, csr_matrix
 
 from SuperPang.lib.utils import read_fasta, write_fasta, reverse_complement, print_time
 from SuperPang.lib.Compressor import Compressor

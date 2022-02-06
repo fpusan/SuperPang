@@ -83,3 +83,4 @@ setuptools.setup(
 # rm -r dist/* SuperPang.egg-info/ rm SuperPang/lib/*c SuperPang/lib/*so
 # python3 setup.py sdist --cythonize
 # python3 -m twine upload --repository pypi dist/*
+# rm -r dist/* SuperPang.egg-info/ rm SuperPang/lib/*c SuperPang/lib/*so

@@ -236,13 +236,13 @@ def parse_args():
                         help = 'Input fasta files with the sequences for each bin/genome')
     parser.add_argument('-q', '--checkm', type = str,
                         help = 'CheckM output for the bins, or *.tsv file with bin and completeness for each bin')
-    parser.add_argument('-i', '--identity_threshold', type = float, default = 0.9,
+    parser.add_argument('-i', '--identity_threshold', type = float, default = 0.95,
                         help = 'Identity threshold (fraction) to initiate correction with minimap2')
     parser.add_argument('-m', '--mismatch-size-threshold', type = int, default = 100,
                         help = 'Maximum contiguous mismatch size that will be corrected')
     parser.add_argument('-g', '--indel-size-threshold', type = int, default = 100,
                         help = 'Maximum contiguous indel size that will be corrected')
-    parser.add_argument('-r', '--correction-repeats', type = int, default = 5,
+    parser.add_argument('-r', '--correction-repeats', type = int, default = 20,
                         help = 'Maximum iterations for sequence correction')
     parser.add_argument('-n', '--correction-repeats-min', type = int, default = 5,
                         help = 'Minimum iterations for sequence correction')

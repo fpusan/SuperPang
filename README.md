@@ -17,10 +17,10 @@ test-SuperPang.py
 
 * *-f/--fasta*: Input fasta files with the sequences for each bin/genome
 * *-q/--checkm*: CheckM output for the bins. This can be the STDOUT of running checkm on all the fasta files passed in *--fasta*, or a tab-delimited file in the form `genome1 percent_completeness`. If empty, completeness will be estimated by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1) but this may lead to wrong estimations for very incomplete genomes.
-* *-i/--identity_threshold*: Identity threshold (fraction) to initiate correction with minimap2. Default `0.9`.
+* *-i/--identity_threshold*: Identity threshold (fraction) to initiate correction with minimap2. Default `0.95`.
 * *-m/--mismatch-size-threshold*: Maximum contiguous mismatch size that will be corrected. Default `100`.
 * *-g/--indel-size-threshold*: Maximum contiguous indel size that will be corrected. Default `100`.
-* *-r/--correction-repeats*: Maximum iterations for sequence correction. Default `5`.
+* *-r/--correction-repeats*: Maximum iterations for sequence correction. Default `20`.
 * *-n/--correction-repeats-min*: Minimum iterations for sequence correction. Default `5`.
 * *-k/--ksize*: Kmer-size. Default `301`.
 * *-l/--minlen*: Scaffold length cutoff. Default `0` (no cutoff).
