@@ -85,6 +85,13 @@ def main(args):
         for arg in vars(args):
             outfile.write(f'{arg}\t{getattr(args, arg)}\n')
 
+
+    ### Ensure the checkm file is available
+    if args.checkm:
+        with open(args.checkm):
+            pass
+
+
     ### Load sequences
     name2bin = {}
     seqDict = {}
@@ -167,7 +174,7 @@ def main(args):
         for name, bin_ in name2bin.items():
             featDict[bin_].update(name2ids[name])
         
-        motu = mOTU( name = "mOTUpan_core_prediction" , faas = {} , cog_dict = featDict, checkm_dict = completeness, max_it = 100, threads = args.threads, precluster = False, method = 'default', quiet = True)
+        motu = mOTU( name = "mOTUpan_core_prediction" , faas = {} , cog_dict = featDict, checkm_dict = completeness, max_it = 100, threads = args.threads, precluster = False, method = 'default', quiet = not args.verbose_mOTUpan)
         if motu.get_stats()['mOTUpan_core_prediction']['core']:
             for id_ in motu.get_stats()['mOTUpan_core_prediction']['core']:
                 id2tag[id_] = 'core'
@@ -252,7 +259,7 @@ def parse_args():
                         help = 'Scaffold length cutoff')
     parser.add_argument('-c', '--mincov', type = float, default = 0,
                         help = 'Scaffold coverage cutoff')
-    parser.add_argument('-b', '--bubble-identity-threshold', type = float, default = 0.7,
+    parser.add_argument('-b', '--bubble-identity-threshold', type = float, default = 0.95,
                         help = 'Minimum identity (matches / alignment length) required to remove a bubble in the sequence graph')
     parser.add_argument('-a', '--genome-assignment-threshold', default = 0.5, type = float,
                         help = 'Fraction of shared kmers required to assign a contig to an input genome')
@@ -263,18 +270,20 @@ def parse_args():
     parser.add_argument('-o', '--output-dir', type = str, default = 'output',
                         help = 'Output directory')
     parser.add_argument('--assume-complete', action='store_true',
-                        help = 'Assume that the input genomes are complete (--genome-assignment-threshold 0.95 --default-completeness 95)')
+                        help = 'Assume that the input genomes are complete (--genome-assignment-threshold 0.95 --default-completeness 99)')
     parser.add_argument('--minimap2-path', type = str, default = 'minimap2',
                         help = 'Path to the minimap2 executable')
     parser.add_argument('--keep-intermediate', action='store_true',
                         help = 'Keep intermediate files')
+    parser.add_argument('--verbose-mOTUpan', action='store_true',
+                        help = 'Print out mOTUpan logs')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Write results even if the output directory already exists')
     args = parser.parse_args()
     if args.assume_complete:
         args.checkm = None
         args.genome_assignment_threshold = 0.95
-        args.default_completeness = 95
+        args.default_completeness = 99
     return args
 
 

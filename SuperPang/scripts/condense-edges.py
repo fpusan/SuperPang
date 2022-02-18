@@ -220,7 +220,7 @@ def main():
     assert len(addedNodes) == len(name2id)
 
     write_fasta(newSeqs, outname + '.fasta')
-    write_fasta(newCore, outname + '.core.fasta')
+##    write_fasta(newCore, outname + '.core.fasta') # this is somehow not working anymore (has very low completeness), not sure why but we were not using it anyways
 
 
 def G2dicts(GS, name2vertex, vertex2name):
