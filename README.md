@@ -14,12 +14,11 @@ test-SuperPang.py
 `SuperPang.py --fasta <genome1.fasta> <genome2.fasta> <genomeN.fasta> --checkm <check_results> --output-dir <output_directory>`
 
 
-## Input files and parameter choice
+## Input files and choice of parameters
 - The input genomes can be genomes from isolates, MAGs (Metagenome-Assembled Genomes) or SAGs (Single-cell Assembled Genomes).
 - The input genomes can have different qualities, for normal usage we recommend that you provide completeness estimates for each input genome through the `-q/--checkm` parameter.
 - If you are certain that all your input genomes are complete, you can use the `--assume-complete` flag or manually tweak the `-a/--genome-assignment-threshold` and `-x/--default-completeness` parameters instead of providing a file with completeness estimates.
-- The default parameter values in SuperPang assume that all of the input genomes come from the same species (ANI>=0.95). This can be controlled by changing the values of the `-i/--identity_threshold` and `-b/--bubble-identity-threshold` to the expected ANI. However SuperPang has currently only been tested in species.level clusters. 
-
+- The default parameter values in SuperPang assume that all of the input genomes come from the same species (ANI>=0.95). This can be controlled by changing the values of the `-i/--identity_threshold` and `-b/--bubble-identity-threshold` to the expected ANI. However SuperPang has currently only been tested in species-level clusters.
 
 
 ## Arguments
