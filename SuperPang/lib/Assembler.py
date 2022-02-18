@@ -194,7 +194,7 @@ class Assembler:
             seqPathsRemaining = {name: vs for name, vs in self.seqPaths.items() if name not in addedSeqs}
 
             ### Reconstruct non-branching paths
-            print_time('\tCollecting non-branching paths')
+            print_time('\tCollecting non-branching paths (NBPs)')
             NBPs = []
             path_limits = defaultdict(list)
             inits = set()
@@ -249,7 +249,7 @@ class Assembler:
                 assert len(p) > 1
 
             ### Build a graph of connected non-branching paths, and split into fwd and rev component
-            print_time(f'\tBuilding sequence graph out of {len(NBPs)} non-branching paths')
+            print_time(f'\tBuilding sequence graph out of {len(NBPs)} NBPs')
 
             # Remove NBPs with terminally duplicated vertices
             # Those broke our code once. we had three nvs with NBPs (0,0,1,2) (0,1,2) and (2,1,0) under the same pset (see below)
@@ -688,7 +688,7 @@ class Assembler:
                         assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
                         assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
 
-                msg += f', processing {len(NBPs)} non-branching paths'
+                msg += f', processing {len(NBPs)} NBPs'
                 print_time(msg, end = '\r')
                 
 
