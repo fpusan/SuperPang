@@ -45,11 +45,11 @@ test-SuperPang.py
 ## Output
 * `assembly.fasta`: contigs.
 * `assembly.info`: core/auxiliary and path information for each contig.
-* `nodes.fasta`: non-branching paths.
-* `core.fasta`: non-branching paths deemed to belong to the core genome of the species by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1).
-* `auxiliary.fasta`: non-branching paths deemed to belong to the auxiliary genome of the species.
+* `NBPs.fasta`: non-branching paths.
+* `NBPs.core.fasta`: non-branching paths deemed to belong to the core genome of the species by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1).
+* `NBPs.accessory.fasta`: non-branching paths deemed to belong to the accessory genome of the species.
 * `graph.fastg`: assembly graph in a format compatible with [bandage](https://rrwick.github.io/Bandage/).
-* `node2origins.tsv`: tab-separated file with the assembly nodes, and a comma-separated list of the input genome in which that node was deemed present.
+* `NBP2origins.tsv`: tab-separated file with the non-branching path IDs, and a comma-separated list of the input genome in which that node was deemed present.
 * `params.tsv`: parameters used in the run.
 
 ## About
