@@ -95,7 +95,8 @@ def main(args):
     ### Load sequences
     name2bin = {}
     seqDict = {}
-    for f in args.fasta:
+    genomes = open(args.fasta[0]).read().strip().split('\n') if len(args.fasta) == 1 else args.fasta
+    for f in genomes:
         bin_ = f.rsplit('/',1)[1].rsplit('.',1)[0] if '/' in f else f.rsplit('.',1)[0]
         for name, seq in read_fasta(f).items():
             if name in seqDict:
@@ -240,7 +241,7 @@ def main(args):
 def parse_args():
     parser = ArgumentParser(description='Create a consensus pangenome assembly from a set of bins/genomes from the same mOTU/species')
     parser.add_argument('-f', '--fasta', type = str, nargs='+', required = True,
-                        help = 'Input fasta files with the sequences for each bin/genome')
+                        help = 'Input fasta files with the sequences for each bin/genome, or a single file containing the path to one input fasta file per line')
     parser.add_argument('-q', '--checkm', type = str,
                         help = 'CheckM output for the bins, or *.tsv file with bin and completeness for each bin')
     parser.add_argument('-i', '--identity_threshold', type = float, default = 0.95,
