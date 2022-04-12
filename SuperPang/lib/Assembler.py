@@ -20,17 +20,27 @@ from mappy import Aligner
 class Assembler:
 
     ### MULTIPROCESS METHODS
-    # In order to save memory minimize serialization/deserialization overheads when multiprocessing we will pass the input variables to our target function as class attributes (a.k.a. gloryfied globals).
-    # We set them before opening the process pool: this way they get inherited when forking the original process, and linux's Copy On Write makes it so memory is actually not copied unless it is modified.
-    # The output of our function still needs to be serialized by the workers and deserialized by the main process, so this will not work if outputs are large and frequent
-    # For that we can use shared memory (see __init__), particularly for output amenable to be stored in array (ints, bytes...)
+    # In order to save memory minimize serialization/deserialization overheads when multiprocessing we will pass the
+    #   input variables to our target function as class attributes (a.k.a. gloryfied globals).
+    #
+    # We set them before opening the process pool: this way they get inherited when forking the original process,
+    #   and linux's Copy On Write makes it so memory is actually not copied unless it is modified.
+    #
+    # The output of our function still needs to be serialized by the workers and deserialized by the main process,
+    #   so this will not work if outputs are large and frequent
+    #
+    # For that we can use shared memory (see __init__), particularly for output amenable to be stored in
+    #   an array (ints, bytes...)
 
     multiprocessing_globals = tuple()
 
     @classmethod
     def set_multiprocessing_globals(cls, *args):
-        # Multiprocessing.Pool.map comes with a significant overhead in serializing the arguments and sending them to the workers, which beats the purpose of multiprocessing.
-        # What we'll do instead is store the required variables as a class attribute before starting the pool. Those will be copied when forking the process, which is much faster.
+        # Multiprocessing.Pool.map comes with a significant overhead in serializing the arguments and sending them to the workers,
+        #    which beats the purpose of multiprocessing.
+        #
+        # What we'll do instead is store the required variables as a class attribute before starting the pool. Those will be copied
+        #    when forking the process, which is much faster.
         cls.multiprocessing_globals = args
 
 
@@ -73,7 +83,7 @@ class Assembler:
 
         ### Read input sequences
         print_time(f'Reading sequences')
-        self.seqDict = read_fasta(fasta, Ns = 'split')
+        self.seqDict = read_fasta(fasta, ambigs = 'as_Ns', Ns = 'split')
         nNs = len({name.split('_Nsplit_')[0] for name in self.seqDict})
 
         ### Kmer hashing related parameters
@@ -826,8 +836,15 @@ class Assembler:
             ks = (k, reverse_complement(k))
             toadd = []
             for k in ks:
-                if k[:-1] == kmers[-1][1:]:
-                    toadd.append(k)
+                try:
+                    if k[:-1] == kmers[-1][1:]:
+                        toadd.append(k)
+                except:
+                    print(k)
+                    print()
+                    print()
+                    print(kmers)
+                    raise
             assert len(toadd) <= 2
             if not toadd:
                 break

@@ -2,12 +2,18 @@ from datetime import datetime
 import resource
 
 
-def read_fasta(fasta, Ns = 'ignore'):
+def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore'):
     assert Ns in ('ignore', 'split')
+    assert ambigs in ('ignore', 'as_Ns')
+    ambig2N = {ord(a): ord('N') for a in ('R', 'Y', 'K', 'M', 'S', 'W', 'B', 'D', 'H', 'V')} # ord bc str.translate wants ascii codes
+    allowedChars = {'A', 'C', 'T', 'G', 'N'}
     seqDict = {}
     for seq in open(fasta).read().strip().lstrip('>').split('>'):
         name, seq = seq.split('\n',1)
-        seq = seq.upper().replace('\n','').replace('.','').replace('-','')
+        seq = seq.upper().replace('\n','').replace('.','').replace('-','').replace('U','A')
+        if ambigs == 'as_Ns': # just translate the
+            seq = seq.translate(ambig2N)
+            assert set(seq).issubset(allowedChars)
         s = 0
         if name in seqDict:
             raise Exception(f'Sequence "{name}" is duplicated in your input file')
