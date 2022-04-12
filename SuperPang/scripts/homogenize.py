@@ -24,29 +24,38 @@ def main(args):
     fasta2fastq(args.fasta, current1)
     corrected = {}
     correction_tries = defaultdict(int)
+    prev_tries = sum(correction_tries.values())
     rounds = 0
 
     print_time('Correcting input sequences with minimap2')
-    print_time('round\t#corrected\tmismatches\tindels\terrors')
+    print_time('round\tcorrectedFull\tcorrectedPartial\tmismatches\tindels\terrors')
     while True:
         rounds += 1
         mLen, iLen, oLen, corrected_thisround, nErrors = iterate(args, rounds, prefix, current1, current2, corrected, correction_tries,
                                                                  identity_threshold = args.identity_threshold,
                                                                  mismatch_size_threshold = args.mismatch_size_threshold,
                                                                  indel_size_threshold = args.indel_size_threshold)
-        print_time('\t'.join(map(str, [rounds, len(corrected_thisround), iLen-mLen, oLen-iLen, nErrors])))
         for b in corrected_thisround:
             if b not in corrected:
                 corrected[b] = set()
             corrected[b].update(corrected_thisround[b])
         call(['mv', current2, current1])
-        if not corrected_thisround and rounds >= args.correction_repeats_min:
+
+        current_tries = sum(correction_tries.values())
+        corrected_partial = current_tries - prev_tries
+
+        print_time('\t'.join(map(str, [rounds, len(corrected_thisround), corrected_partial, iLen-mLen, oLen-iLen, nErrors])))
+
+        if not corrected_thisround and not corrected_partial and rounds >= args.correction_repeats_min:
             # In some cases we report no corrected_thisround because fullCorrection = False for all sequences
             # We actually had corrected parts of them, and we will properly correct them in later rounds
             # correction_repeats_min ensures that we will try enough in order to get to fullCorrection = True and progress from there
+            # in some cases we also reach correction_repeats_min without doing any full correction. we check with corrected_partial
             break
         if rounds == args.correction_repeats:
             break
+        prev_tries = current_tries
+
     fastq2fasta(current1, args.output)
 
 
