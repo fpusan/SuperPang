@@ -26,8 +26,23 @@ from collections import defaultdict
 from subprocess import call, DEVNULL
 from argparse import ArgumentParser
 
+with open(path + '/../../VERSION') as infile:
+    VERSION = infile.read().strip()
+CITATION = 'Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson. Exploring intra-species diversity through non-redundant pangenome assemblies. bioRxiv (2022) DOI: 10.1101/2022.03.25.485477'
+
 
 def main(args):
+
+
+    ### Welcome message
+    print()
+    print(f'This is SuperPang version {VERSION}')
+    print()
+    print('If using in publications or products please cite:')
+    print()
+    print(CITATION)
+    print()
+    print()
 
 
     ### File names
