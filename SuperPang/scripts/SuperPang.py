@@ -26,7 +26,9 @@ from collections import defaultdict
 from subprocess import call, DEVNULL
 from argparse import ArgumentParser
 
-with open(path + '/../../VERSION') as infile:
+libpath = dirname(realpath(getfile(Assembler)))
+
+with open(libpath + '/../VERSION') as infile:
     VERSION = infile.read().strip()
 CITATION = 'Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson. Exploring intra-species diversity through non-redundant pangenome assemblies. bioRxiv (2022) DOI: 10.1101/2022.03.25.485477'
 
@@ -93,6 +95,7 @@ def main(args):
 
     ### Log params
     with open(params, 'w') as outfile:
+        outfile.write(f'version\t{VERSION}\n'    )
         outfile.write(f'main_sha1\t{main_sha1}\n')
         outfile.write(f'homo_sha1\t{homo_sha1}\n')
         outfile.write(f'asse_sha1\t{asse_sha1}\n')

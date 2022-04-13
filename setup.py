@@ -50,7 +50,7 @@ with open("README.md", "r") as fh:
 setuptools.setup(
     cmdclass={'install': InstallCommand, 'sdist': SDistCommand},
     name="SuperPang",
-    version=open('VERSION').read().strip(),
+    version=open('SuperPang/VERSION').read().strip(),
     author="Fernando Puente-Sánchez",
     author_email="fernando.puente.sanchez@slu.se",
     description="Non-redundant pangenome assemblies from multiple genomes or bins",
@@ -83,4 +83,4 @@ setuptools.setup(
 # rm -r dist/* SuperPang.egg-info/ rm SuperPang/lib/*c SuperPang/lib/*so
 # python3 setup.py sdist --cythonize
 # python3 -m twine upload --repository pypi dist/*
-# rm -r dist/* SuperPang.egg-info/ rm SuperPang/lib/*c SuperPang/lib/*so
+# rm -r dist/* SuperPang.egg-info/ SuperPang/lib/*c
