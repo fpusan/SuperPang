@@ -75,11 +75,11 @@ class Assembler:
         Build a De-Bruijn Graph from an input fasta file
         """
 
-        self.ksize = ksize
+        self.ksize        = ksize
         self.includedSeqs = 0
-        self.hash2vertex = {}
-        self.vertex2hash = {}
-        self.seqPaths = {} # name: pathSet
+        self.hash2vertex  = {}
+        self.vertex2hash  = {}
+        self.seqPaths     = {} # name: pathSet
 
         ### Read input sequences
         print_time(f'Reading sequences')
@@ -193,6 +193,11 @@ class Assembler:
 
         ### Process connected components
         for c, vs in comp2vertices.items():
+
+            if False: # DEBUG CODE: Skip unwanted components
+                TGT_COMP = 1
+                if c + 1 != TGT_COMP:
+                    continue
             
             print_time(f'Working on comp {c+1}/{len(comp2vertices)}')
             
@@ -226,9 +231,11 @@ class Assembler:
                             isCycle = True
                             ignoreEdge = {v, neighbors[0]}
                             break
-                   
+
             for j, ini in enumerate(inits):
                 for n in set(self.DBG.get_all_neighbors(ini)):
+                    if isCycle and ini in ignoreEdge and n in ignoreEdge: # Break cycle at the pre-defined point
+                        continue
                     p = [ini, n]
                     last = ini
                     while True:
@@ -239,20 +246,26 @@ class Assembler:
                         s = s.pop()
                         if isCycle: # Break cycle at the pre-defined point
                             if last in ignoreEdge and s in ignoreEdge:
-                                break
+                                break # This is actually still needed to avoid an infinite loop. I should just mask the offending edges
                         p.append(s)
                     p = tuple(p)
                     NBPs.append(p)
 
-            # Corner case
-            if len(NBPs) == 2: #### case in which only a starting/ending vertex is common to two sequences,
-                               #### so both are joined by that vertex but that vertex seems an extender (1 in 1 out)
-                               #### If there was really one path we are cutting it, but we'll join it later
-                p = NBPs[0] # cut it in half
-                if len(p)%2:
-                    cut = int((len(p)+1)/2)
-                    inits.add(p[cut-1])
-                    NBPs = [p[:cut], p[:cut][::-1], p[-cut:], p[-cut:][::-1]]
+            if isCycle: # make them circular by adding the first vertex also in the end so there's an overlap
+                assert len(NBPs) == 2
+                NBPs = [NBP+(NBP[0],) for NBP in NBPs]
+
+
+##            # Corner case
+##            if len(NBPs) == 2: #### case in which only a starting/ending vertex is common to two sequences,
+##                               #### so both are joined by that vertex but that vertex seems an extender (1 in 1 out)
+##                               #### If there was really one path we are cutting it, but we'll join it later
+##                p = NBPs[0] # cut it in half
+##                if len(p)%2:
+##                    cut = int((len(p)+1)/2)
+##                    inits.add(p[cut-1])
+##                    NBPs = [p[:cut], p[:cut][::-1], p[-cut:], p[-cut:][::-1]]
+
 
             # Check that there are no len==1 NBPs
             for p in NBPs:
@@ -290,7 +303,22 @@ class Assembler:
                     NBPG.add_edge(NBP2vertex[p1], NBP2vertex[p2])
                            
             vertex2NBP = {v: p for p,v in NBP2vertex.items()}
-            
+
+
+            ### Write component's input sequences, DBG and NBPG
+            if False:
+                oris = {ori for oris in self.multimap(self.get_vertex2origins, threads, list(vs), self.seqPaths, single_thread_threshold = 10000) for ori in oris}
+                with open(f'comp_{c+1}.fasta', 'w') as outfile:
+                    for ori in oris:
+                        outfile.write(f'>{ori}\n{self.seqDict[ori]}\n')
+                self.DBG.vp.vfilt = self.DBG.new_vertex_property('bool')
+                self.set_vertex_filter(self.DBG, vs)
+                print(f'DBG: {self.DBG.num_vertices()} vertices, {self.DBG.num_edges()} edges')
+                self.DBG.save(f'comp_{c+1}.DBG.graphml')
+                print(f'NBPG: {NBPG.num_vertices()} vertices, {NBPG.num_edges()} edges')
+                NBPG.save(f'comp_{c+1}.NBPG.graphml')
+
+
             ### Extract forward component
             def get_psets(nvs):
                 """Get a dict with a frozenset of vertices as keys, and the two complementary non-branching paths sharing those vertices as values"""
@@ -299,9 +327,12 @@ class Assembler:
                     pset = frozenset(vertex2NBP[nv])
                     psets[pset].append(nv)
                 for nvs_ in psets.values():
+                    if len(nvs_) > 2:
+                        for nv_ in nvs_:
+                            print(nv_, len(vertex2NBP[nv_]), vertex2NBP[nv_][:10], vertex2NBP[nv_][-10:])
                     assert len(nvs_) == 2
                 return psets
-                        
+
 
             print_time('\tExtracting forward component')
             comp2nvs = defaultdict(set)
@@ -565,7 +596,7 @@ class Assembler:
 
                 if mincov:
                     # Compute scaffold coverage
-                    scaffoldCov = np.mean(self.multimap(self.vertex2originslen, threads, [v for p in NBPs for v in p], seqPathsRemaining, single_thread_threshold = 10000))
+                    scaffoldCov = np.mean(self.multimap(self.get_vertex2originslen, threads, [v for p in NBPs for v in p], seqPathsRemaining, single_thread_threshold = 10000))
                     msg += f', cov {round(scaffoldCov, 2)}'
                     if mincov and scaffoldCov < mincov:
                         msg += ' (< mincov, IGNORED)'
@@ -690,13 +721,16 @@ class Assembler:
                 successors   = defaultdict(list, [(p, succs) for p, succs in successors.items()   if p in pathSet])
 
                     
-                # Check that paths with one predecessor and successor happen only around branching points
-                for p in NBPs:
-                    if len(predecessors[p])==1 and len(successors[p])==1:
-                        pred = predecessors[p][0]
-                        succ = successors[p][0]
-                        assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
-                        assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
+                # Check that paths with one predecessor and successor happen only around branching points or in cycles
+                if isCycle:
+                    assert len(NBPs) == 1
+                else:
+                    for p in NBPs:
+                        if len(predecessors[p])==1 and len(successors[p])==1:
+                            pred = predecessors[p][0]
+                            succ = successors[p][0]
+                            assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
+                            assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
 
                 msg += f', processing {len(NBPs)} non-branching paths'
                 print_time(msg, end = '\r')
@@ -836,15 +870,8 @@ class Assembler:
             ks = (k, reverse_complement(k))
             toadd = []
             for k in ks:
-                try:
-                    if k[:-1] == kmers[-1][1:]:
-                        toadd.append(k)
-                except:
-                    print(k)
-                    print()
-                    print()
-                    print(kmers)
-                    raise
+                if k[:-1] == kmers[-1][1:]:
+                    toadd.append(k)
             assert len(toadd) <= 2
             if not toadd:
                 break
@@ -914,9 +941,14 @@ class Assembler:
         ori2cov = defaultdict(int)
         for v in path:
             for ori in cls.vertex2origins(v, seqPaths) | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
-                ori2cov[ori] += 1                                                         # but to bubbles that were originally in this path before we popped them
+                ori2cov[ori] += 1                                                  # but to bubbles that were originally in this path before we popped them
         return {ori: cov/len(path) for ori, cov in ori2cov.items()}
 
+
+    @classmethod
+    def get_vertex2origins(cls, i):
+        vertices, seqPaths = cls.get_multiprocessing_globals()
+        return cls.vertex2origins(vertices[i], seqPaths)
         
 
     @classmethod
@@ -929,7 +961,7 @@ class Assembler:
 
 
     @classmethod
-    def vertex2originslen(cls, i):
+    def get_vertex2originslen(cls, i):
         """
         Return the number of input sequences that contain a given vertex in the De-Bruijn Graph
         """
