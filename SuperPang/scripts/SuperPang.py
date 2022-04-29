@@ -35,7 +35,6 @@ CITATION = 'Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson. Exploring in
 
 def main(args):
 
-
     ### Welcome message
     print()
     print(f'This is SuperPang version {VERSION}')
@@ -93,6 +92,7 @@ def main(args):
             if e.errno != 17:
                 raise
 
+
     ### Log params
     with open(params, 'w') as outfile:
         outfile.write(f'version\t{VERSION}\n'    )
@@ -102,12 +102,6 @@ def main(args):
         outfile.write(f'cond_sha1\t{cond_sha1}\n')
         for arg in vars(args):
             outfile.write(f'{arg}\t{getattr(args, arg)}\n')
-
-
-    ### Ensure the checkm file is available
-    if args.checkm:
-        with open(args.checkm):
-            pass
 
 
     ### Load sequences
@@ -127,6 +121,22 @@ def main(args):
         with open(name2bin_kept, 'w') as outfile:
             for name, bin_ in name2bin.items():
                 outfile.write(f'{name}\t{bin_}\n')
+
+    ### Ensure the checkm file is available and properly formatted, and parse it
+    if not args.checkm:
+        completeness = {bin_: args.default_completeness for bin_ in set(name2bin.values())}
+    elif args.checkm.endswith('.tsv'):
+        completeness = {bin_: float(completeness) for bin_, completeness in (line.strip().split('\t') for line in open(args.checkm))}
+    else:
+        completeness = {bin_: vals['Completeness'] for bin_, vals in parse_checkm(args.checkm).items()}
+    missing_bins = set(name2bin.values()) - set(completeness)
+    if missing_bins:
+        print('\nThe following bins are missing from your CheckM/completeness file:\n')
+        for bin_ in missing_bins:
+            print(bin_)
+        print('\nNote that SuperPang expect bin names in the CheckM/completeness file to NOT contain the file extension\n')
+        sys.exit(1)
+
     
     ### Correct input sequences with minimap2
     correct = args.identity_threshold and args.identity_threshold < 1
@@ -179,12 +189,7 @@ def main(args):
         for id_ in contigs:
             id2tag[id_] = 'core'
     else:
-        if not args.checkm:     
-            completeness = {bin_: args.default_completeness for bin_ in set(name2bin.values())}
-        elif args.checkm.endswith('.tsv'):
-            completeness = {bin_: float(completeness) for bin_, completeness in (line.strip().split('\t') for line in open(args.checkm))}
-        else:
-            completeness = {bin_: vals['Completeness'] for bin_, vals in parse_checkm(args.checkm).items()}
+        # completeness dict for mOTUpan was defined above so that we can identify problems in the beginning
         name2ids = defaultdict(set)
         for id_, contig in contigs.items():
             for ori in contig.origins:
@@ -240,7 +245,10 @@ def main(args):
     with open(outputNode2origs, 'w') as outfile:
         for id_, contig in contigs.items():
             origs = ','.join(contig.origins)
-            outfile.write(f'{nodeNames[id_]}\t{origs}\n')
+            bins = [name2bin[name] for name in contig.origins]
+            lbins = len(set(bins))
+            bins  = ','.join(bins)
+            outfile.write(f'{nodeNames[id_]}\t{origs}\t{bins}\t{lbins}/{len(completeness)}\n')
 
     ### Condense edges
     print_time('Reconstructing contigs')

@@ -25,7 +25,7 @@ test-SuperPang.py
 
 ## Arguments
 * *-f/--fasta*: Input fasta files with the sequences for each bin/genome, or a single file containing the path to one input fasta file per line.
-* *-q/--checkm*: CheckM output for the bins. This can be the STDOUT of running checkm on all the fasta files passed in *--fasta*, or a tab-delimited file in the form `genome1 percent_completeness`. If empty, completeness will be estimated by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1) but this may lead to wrong estimations for very incomplete genomes.
+* *-q/--checkm*: CheckM output for the bins. This can be the STDOUT of running checkm on all the fasta files passed in *--fasta*, or a tab-delimited file ended with a `.tsv` extension, in the form `genome1 percent_completeness`. Genome names should not contain the file extension (e.g. `.fna`). If empty, completeness will be estimated by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1) but this may lead to wrong estimations for very incomplete genomes.
 * *-i/--identity_threshold*: Identity threshold (fraction) to initiate correction with minimap2. Values of 1 or higher will skip the correction step entirely. Default `0.95`.
 * *-m/--mismatch-size-threshold*: Maximum contiguous mismatch size that will be corrected. Default `100`.
 * *-g/--indel-size-threshold*: Maximum contiguous indel size that will be corrected. Default `100`.
@@ -51,7 +51,7 @@ test-SuperPang.py
 * `NBPs.core.fasta`: non-branching paths deemed to belong to the core genome of the species by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1).
 * `NBPs.accessory.fasta`: non-branching paths deemed to belong to the accessory genome of the species.
 * `graph.fastg`: assembly graph in a format compatible with [bandage](https://rrwick.github.io/Bandage/).
-* `NBP2origins.tsv`: tab-separated file with the non-branching path IDs, and a comma-separated list of the input genome in which that node was deemed present.
+* `NBP2origins.tsv`: tab-separated file with the non-branching path IDs, a comma-separated list of the input sequences in which that NBP was deemed present, a comma-separated list of the input genomes in which that NBP was deemed present, and the number of input genomes in which that NBP was deemed present.
 * `params.tsv`: parameters used in the run.
 
 ## About
