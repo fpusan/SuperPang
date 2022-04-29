@@ -290,7 +290,7 @@ def parse_args():
                         help = 'Minimum identity (matches / alignment length) required to remove a bubble in the sequence graph')
     parser.add_argument('-a', '--genome-assignment-threshold', default = 0.5, type = float,
                         help = 'Fraction of shared kmers required to assign a contig to an input genome')
-    parser.add_argument('-x', '--default-completeness', type = float, default = 50,
+    parser.add_argument('-x', '--default-completeness', type = float, default = 70,
                         help = 'Default genome completeness to assume if a CheckM output is not provided')
     parser.add_argument('-t', '--threads', type = int, default = 1,
                         help = 'Number of processors to use')

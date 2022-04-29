@@ -36,7 +36,7 @@ test-SuperPang.py
 * *-c/--mincov*: Scaffold coverage cutoff. Default `0` (no cutoff).
 * *-b/--bubble-identity-threshold*: Minimum identity (matches / length) required to remove a bubble in the sequence graph. Default `0.95`.
 * *-a/--genome-assignment-threshold*. Fraction of shared kmers required to assign a contig to an input genome (0 means a single shared kmer is enough). Default `0.5`.
-* *-x/--default-completeness*: Default genome completeness to assume if a CheckM output is not provided with *--checkm*. Default `50`.
+* *-x/--default-completeness*: Default genome completeness to assume if a CheckM output is not provided with *--checkm*. Default `70`.
 * *-t/--threads*: Number of processors to use. Default `1`.
 * *-o/--output*: Output directory. Default `output`.
 * *--assume-complete*: Assume that the input genomes are complete (*--genome-assignment-threshold 0.95*, *--default-completeness 99*).
