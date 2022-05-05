@@ -80,6 +80,7 @@ class Assembler:
         self.hash2vertex  = {}
         self.vertex2hash  = {}
         self.seqPaths     = {} # name: pathSet
+        self.seqLimits    = set()
 
         ### Read input sequences
         print_time(f'Reading sequences')
@@ -141,7 +142,7 @@ class Assembler:
                         self.clear_multiprocessing_globals()
 
                         # Populate the DBG
-                        sp = set()
+                        sp = []
                         prev = -1 # store the previous vertex here so we can build (prev, v) edge tuples
                         for h, rh in zip(hashes, revhashes):
                             if h not in self.hash2vertex and rh not in self.hash2vertex:
@@ -154,13 +155,15 @@ class Assembler:
                                 v = self.hash2vertex[rh]
                             else:
                                 raise('wtf')
-                            sp.add(v)
+                            sp.append(v)
                             if prev >=0:
                                 edges.add( (prev, v) )
                                 edges.add( (v, prev) )
                             prev = v
                                 
-                        self.seqPaths[name] = sp
+                        self.seqPaths[name] = set(sp)
+                        self.seqLimits.add( sp[0]  )
+                        self.seqLimits.add( sp[-1] )
                                                 
                         if elapsedSize - lastSize > totalSize/100:
                             print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {len(self.hash2vertex)} vertices, {len(edges)} edges         ', end = '\r')
@@ -215,7 +218,8 @@ class Assembler:
             path_limits = defaultdict(list)
             inits = set()
             badEdges = set()
-            inits = {v for v, isInit in zip(list(vs), self.multimap(self.is_NBP_init, threads, list(vs), self.DBG, self.vertex2hash, self.compressor)) if isInit}
+            inits = {v for v, isInit in zip(list(vs), self.multimap(self.is_NBP_init, threads, list(vs), self.DBG, self.seqLimits,
+                                                                    self.vertex2hash, self.compressor)) if isInit}
 
 
             # Break cycle if required
@@ -850,13 +854,13 @@ class Assembler:
             - But a sequence can not really be reconstructed for the paths A->B->C or C->B->A
             - So we mark B as an init even if it looks like an extender in the DBG
         """
-        vs, DBG, vertex2hash, compressor = cls.get_multiprocessing_globals()
+        vs, DBG, seqLimits, vertex2hash, compressor = cls.get_multiprocessing_globals()
         v = vs[i]
         succs = set(DBG.get_out_neighbors(v)) - {v} # - {v} to avoid self loops being init points
         isInit = False
         if len(succs) != 2: 
             isInit = True
-        else:
+        elif v in seqLimits:
             # We are reconstructing the sequence for the edges B->A and B->C
             # Where A,B,C are vertices in the DBG such that A=B=C ("=" denotes bidirectional link)
             #  so A,C are successors of B
@@ -997,10 +1001,20 @@ class Assembler:
         """
         NBPs, seqPaths, bubble_vertex2origins = cls.get_multiprocessing_globals()
         path = NBPs[i]
+
+##        # Pre-screen the seqPaths before the big analysis
+##        # This may save time? It saved 1 second (over 20) for the test dataset...
+##        if len(path) > 10:
+##            pset = {v for i, v in enumerate(path) if not i % 20} | {path[-1]}
+##        else:
+##            pset = {path[0], path[len(path)//2], path[-1]}
+##        candidates = {name: sp for name, sp in seqPaths.items() if pset & sp}
+##        seqPaths = candidates
+        
         ori2cov = defaultdict(int)
         for v in path:
             for ori in cls.vertex2origins(v, seqPaths) | bubble_vertex2origins[v]: # note how I'm also getting origins not really associated to this path
-                ori2cov[ori] += 1                                                  # but to bubbles that were originally in this path before we popped them
+                ori2cov[ori] += 1                                               # but to bubbles that were originally in this path before we popped them
         return {ori: cov/len(path) for ori, cov in ori2cov.items()}
 
 
