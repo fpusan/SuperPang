@@ -168,6 +168,7 @@ class Assembler:
 
         self.DBG = Graph()
         self.DBG.add_edge_list(edges)
+        self.DBG.ep.efilt = self.DBG.new_edge_property('bool')
         print_time(f'\t100% bases added, {self.DBG.num_vertices()} vertices, {self.DBG.num_edges()} edges         ')
 
         
@@ -195,7 +196,7 @@ class Assembler:
         for c, vs in comp2vertices.items():
 
             if False: # DEBUG CODE: Skip unwanted components
-                TGT_COMP = 1
+                TGT_COMP = 35
                 if c + 1 != TGT_COMP:
                     continue
             
@@ -213,40 +214,43 @@ class Assembler:
             NBPs = []
             path_limits = defaultdict(list)
             inits = set()
-            for v in vs:
-                if len(set(self.DBG.get_all_neighbors(v)) - {v}) != 2: # -{v} to avoid self loops being init points
-                    inits.add(v)
+            badEdges = set()
+            inits = {v for v, isInit in zip(list(vs), self.multimap(self.is_NBP_init, threads, list(vs), self.DBG, self.vertex2hash, self.compressor)) if isInit}
+
 
             # Break cycle if required
             isCycle = False
             ignoreEdge = set()
             if not inits:
                 #is this a cycle?
-                if min([len(set(self.DBG.get_all_neighbors(v))) for v in vs]) == 2: # no sources or sinks
+                if min([len(set(self.DBG.get_out_neighbors(v))) for v in vs]) == 2: # no sources or sinks
                     for v in vs:
-                        neighbors = self.DBG.get_all_neighbors(v)
+                        neighbors = self.DBG.get_out_neighbors(v)
                         if len(set(neighbors)) == 2: # find the first extender edge, and break there
                             inits.add(v)
                             inits.add(neighbors[0])
                             isCycle = True
                             ignoreEdge = {v, neighbors[0]}
+                            badEdges.add(self.DBG.edge(v, neighbors[0]))
+                            badEdges.add(self.DBG.edge(neighbors[0], v))
                             break
 
+            # Filter out bad edges
+            if badEdges:
+                for e in self.DBG.edges():
+                    self.DBG.ep.efilt[e] = e not in badEdges
+                self.DBG.set_edge_filter(self.DBG.ep.efilt)
+                    
             for j, ini in enumerate(inits):
-                for n in set(self.DBG.get_all_neighbors(ini)):
-                    if isCycle and ini in ignoreEdge and n in ignoreEdge: # Break cycle at the pre-defined point
-                        continue
+                for n in set(self.DBG.get_out_neighbors(ini)):
                     p = [ini, n]
                     last = ini
                     while True:
-                        s = set(self.DBG.get_all_neighbors(p[-1])) - {last, p[-1]} #p[-1] to avoid stopping at self loops
-                        if len(s) != 1:
+                        if p[-1] in inits:
                             break
+                        s = set(self.DBG.get_out_neighbors(p[-1])) - {last, p[-1]} #p[-1] to avoid stopping at self loops
                         last = p[-1]
                         s = s.pop()
-                        if isCycle: # Break cycle at the pre-defined point
-                            if last in ignoreEdge and s in ignoreEdge:
-                                break # This is actually still needed to avoid an infinite loop. I should just mask the offending edges
                         p.append(s)
                     p = tuple(p)
                     NBPs.append(p)
@@ -254,18 +258,6 @@ class Assembler:
             if isCycle: # make them circular by adding the first vertex also in the end so there's an overlap
                 assert len(NBPs) == 2
                 NBPs = [NBP+(NBP[0],) for NBP in NBPs]
-
-
-##            # Corner case
-##            if len(NBPs) == 2: #### case in which only a starting/ending vertex is common to two sequences,
-##                               #### so both are joined by that vertex but that vertex seems an extender (1 in 1 out)
-##                               #### If there was really one path we are cutting it, but we'll join it later
-##                p = NBPs[0] # cut it in half
-##                if len(p)%2:
-##                    cut = int((len(p)+1)/2)
-##                    inits.add(p[cut-1])
-##                    NBPs = [p[:cut], p[:cut][::-1], p[-cut:], p[-cut:][::-1]]
-
 
             # Check that there are no len==1 NBPs
             for p in NBPs:
@@ -313,8 +305,9 @@ class Assembler:
                         outfile.write(f'>{ori}\n{self.seqDict[ori]}\n')
                 self.DBG.vp.vfilt = self.DBG.new_vertex_property('bool')
                 self.set_vertex_filter(self.DBG, vs)
-                print(f'DBG: {self.DBG.num_vertices()} vertices, {self.DBG.num_edges()} edges')
-                self.DBG.save(f'comp_{c+1}.DBG.graphml')
+                DBG2 = Graph(self.DBG, prune = True)
+                print(f'DBG: {DBG2.num_vertices()} vertices, {DBG2.num_edges()} edges')
+                DBG2.save(f'comp_{c+1}.DBG.graphml')
                 print(f'NBPG: {NBPG.num_vertices()} vertices, {NBPG.num_edges()} edges')
                 NBPG.save(f'comp_{c+1}.NBPG.graphml')
 
@@ -327,9 +320,6 @@ class Assembler:
                     pset = frozenset(vertex2NBP[nv])
                     psets[pset].append(nv)
                 for nvs_ in psets.values():
-                    if len(nvs_) > 2:
-                        for nv_ in nvs_:
-                            print(nv_, len(vertex2NBP[nv_]), vertex2NBP[nv_][:10], vertex2NBP[nv_][-10:])
                     assert len(nvs_) == 2
                 return psets
 
@@ -841,7 +831,50 @@ class Assembler:
         seq, rcSeq = seqMem.buf[:seqlength], rcSeqMem.buf[:seqlength]
         ri = len(rcSeq) - i - ksize
         hashMem.buf[i*clength:(i+1)*clength] = compressor.compress(seq[i:i+ksize])
-        revhashMem.buf[i*clength:(i+1)*clength] = compressor.compress(rcSeq[ri:ri+ksize])     
+        revhashMem.buf[i*clength:(i+1)*clength] = compressor.compress(rcSeq[ri:ri+ksize])
+
+
+    @classmethod
+    def is_NBP_init(cls, i):
+        """
+        Check if a given vertex of a DBG will be a non-branching path init
+        This will happen if
+        1) It has more than 2 outgoing edges (meaning that it is just an extender)
+            (note that the edges in our DBG are bidirectional)
+        2) The node has 2 outgoing edges but it is a fake extender
+            - This happened for a example in which two input sequences diferred only in their
+              last kmer
+            - So original sequences were kA->kB, kC->kB (where kA,kB,kC are kmers)
+            - But due to how we build our DBG, the DBG ends up being A=B=C (where = denotes a
+               bidirectional link)
+            - But a sequence can not really be reconstructed for the paths A->B->C or C->B->A
+            - So we mark B as an init even if it looks like an extender in the DBG
+        """
+        vs, DBG, vertex2hash, compressor = cls.get_multiprocessing_globals()
+        v = vs[i]
+        succs = set(DBG.get_out_neighbors(v)) - {v} # - {v} to avoid self loops being init points
+        isInit = False
+        if len(succs) != 2: 
+            isInit = True
+        else:
+            # We are reconstructing the sequence for the edges B->A and B->C
+            # Where A,B,C are vertices in the DBG such that A=B=C ("=" denotes bidirectional link)
+            #  so A,C are successors of B
+            # Normally when reconstructing B->A and B->C, the valid kmer for B would be in forward
+            #  orientation in one case, and in reverse complement orientation in the other,
+            #  so len(kmers) == 2
+            # However if the node is a fake extender, the valid kmer for B will be the same in
+            #  B->A and B->C
+            kmers = set()
+            k1x = cls.vertex2kmer(v, vertex2hash, compressor)
+            for s in succs:
+                for k1 in (k1x, reverse_complement(k1x)):
+                    ext = cls.extendKmer(k1,s,vertex2hash, compressor)
+                    if ext:
+                        kmers.add(k1)
+            if len(kmers) == 1:
+                isInit = True
+        return isInit
 
 
     @classmethod
@@ -852,30 +885,19 @@ class Assembler:
         NBPs, vertex2hash, compressor = cls.get_multiprocessing_globals()
         path = NBPs[i]
         kmers = []
-        vertex2kmer = partial(cls.vertex2kmer, vertex2hash = vertex2hash, compressor = compressor)
         # Each vertex corresponds to two kmers (fwd and rev)
         # Which kmers give us a meaningful sequence?
         # We are reading this in a given direction (from path[0] to path[-1])
         # For the starting kmer (in position 0), pick the one that overlaps with any of the two kmers in position 1
-        k0x = vertex2kmer(path[0])
-        k1x = vertex2kmer(path[1]) 
-        for k1 in (k1x, reverse_complement(k1x)):
-            for k0 in (k0x, reverse_complement(k0x)):
-                if k1[:-1] in k0:
-                    kmers.append(k0)
-
+        kmers = cls.edge2kmer(path[0], path[1], vertex2hash, compressor)
+        
         # Then just keep advancing in the path, for each vertex pick the kmer that overlaps with the previously-picked kmer
-        for v in path[1:]:
-            k = vertex2kmer(v)
-            ks = (k, reverse_complement(k))
-            toadd = []
-            for k in ks:
-                if k[:-1] == kmers[-1][1:]:
-                    toadd.append(k)
-            assert len(toadd) <= 2
-            if not toadd:
-                break
-            kmers.extend(toadd)
+        for v in path[2:]:
+            kmers.append(cls.extendKmer(kmers[-1], v, vertex2hash, compressor, force = True))
+            
+        assert len(kmers) == len(path) # We can remove this assertion, since edge2kmer and extendKmer(force=True)
+                                       #  have internal assertions
+        
         return cls.seq_from_kmers(kmers)
 
 
@@ -886,6 +908,43 @@ class Assembler:
         """
         return compressor.decompress(vertex2hash[v])
 
+
+    @classmethod
+    def edge2kmer(cls, v1, v2, vertex2hash, compressor):
+        """
+        Return the kmers corresponding to a given edge in the De-Bruijn Graph
+        """
+        # Each vertex corresponds to two kmers (fwd and rev)
+        # Which kmers give us a meaningful sequence?
+        # We are reading this in a given direction (from path[0] to path[-1])
+        # For the starting kmer (in position 0), pick the one that overlaps with any of the two kmers in position 1
+        kmers = []
+        k1x = cls.vertex2kmer(v1, vertex2hash, compressor)
+        for k1 in (k1x, reverse_complement(k1x)):
+            k2 = cls.extendKmer(k1, v2, vertex2hash, compressor)
+            if k2:
+                kmers.extend([k1, k2])
+        
+        assert len(kmers) == 2
+        return kmers
+
+
+    @classmethod
+    def extendKmer(cls, k1, v2, vertex2hash, compressor, force = False):
+        """
+        Return the kmer that extends a given first kmer k1, where k1 is a 
+         kmer coming from a vertex v1, and v1,v2 is an edge in the De-Bruijn Graph
+        """
+        kmers = []
+        k2x = cls.vertex2kmer(v2, vertex2hash, compressor)
+        for k2 in (k2x, reverse_complement(k2x)):
+            if k2[:-1] == k1[1:]:
+                kmers.append(k2)
+        if force:
+            assert len(kmers) == 1
+        else:
+            assert len(kmers) <= 1 # can be 0 if k1 is in the wrong orientation
+        return kmers[0] if kmers else None
 
 
     @staticmethod
