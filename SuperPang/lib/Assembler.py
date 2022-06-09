@@ -139,8 +139,6 @@ class Assembler:
                         hashes = (hashMem.buf[i*clength:(i+1)*clength].tobytes() for i in range(nkmers))
                         revhashes = (revhashMem.buf[i*clength:(i+1)*clength].tobytes() for i in range(nkmers))
                         
-                        self.clear_multiprocessing_globals()
-
                         # Populate the DBG
                         sp = []
                         prev = -1 # store the previous vertex here so we can build (prev, v) edge tuples
@@ -166,18 +164,18 @@ class Assembler:
                         self.seqLimits.add( sp[-1] )
                                                 
                         if elapsedSize - lastSize > totalSize/100:
-                            print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {len(self.hash2vertex)} vertices, {len(edges)} edges         ', end = '\r')
+                            print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases added, {self.includedSeqs} sequences, {len(self.hash2vertex)} vertices, {len(edges)} edges         ', end = '\r')
                             lastSize = elapsedSize
 
+        self.clear_multiprocessing_globals()
         self.DBG = Graph()
         self.DBG.add_edge_list(edges)
         self.DBG.ep.efilt = self.DBG.new_edge_property('bool')
-        print_time(f'\t100% bases added, {self.DBG.num_vertices()} vertices, {self.DBG.num_edges()} edges         ')
-
+        print_time(f'\t100% bases added, {self.includedSeqs} sequences, {self.DBG.num_vertices()} vertices, {self.DBG.num_edges()} edges         ')
         
 
 ##    @profile
-    def run(self, minlen, mincov, bubble_identity_threshold, genome_assignment_threshold, threads):
+    def run(self, minlen, mincov, bubble_identity_threshold, genome_assignment_threshold, max_threads):
         """
         Create contigs from a De-Bruijn Graph
         """
@@ -185,7 +183,6 @@ class Assembler:
         Contig = namedtuple('Contig', ['scaffold', 'i', 'seq', 'tseq', 'cov', 'origins', 'successors'])
         contigs = {}
         addedPaths = set()
-        addedSeqs = set()
 
         ### Identify connected components
         print_time('Identifying connected components')
@@ -199,23 +196,25 @@ class Assembler:
         for c, vs in comp2vertices.items():
 
             if False: # DEBUG CODE: Skip unwanted components
-                TGT_COMP = 35
+                TGT_COMP = 2
                 if c + 1 != TGT_COMP:
                     continue
             
-            print_time(f'Working on comp {c+1}/{len(comp2vertices)}')
+            print_time(f'Working on comp {c+1}/{len(comp2vertices)}, {len(vs)} vertices')
+
+            # The overhead of opening a multiprocessing pool increases with resident memory, even if we do nothing inside it
+            #  so I don't think this is due to COW being triggered, just something the way fork and/or python multiprocessing pool works
+            #  This becomes a problem when I have lots of small components in an otherwise large project, as I pay a large overhead several
+            #  times per component. So instead we will use one thread for small-ish components.
+            threads = max_threads if len(vs) > 150000 else 1
             
-            addedSeqs_thiscomponent = set() # store the sequences overlapping with our NBPs here
-                                            #  when we finish processing the DBG component we will
-                                            #  use this to update addedSeqs
-            # Get the seqPaths that were not overlapping with previous DBG components
-            #  assuming that the same sequence can't overlap in two different DBG graph components
-            seqPathsRemaining = {name: vs for name, vs in self.seqPaths.items() if name not in addedSeqs}
+            # Get the seqPaths that appear in this DBG component
+            #  just check that the first vertex in the seqPath belongs to this component
+            seqPathsThisComp = {name: sp for name, sp in self.seqPaths.items() if iter(sp).__next__() in vs}
 
             ### Reconstruct non-branching paths
             print_time('\tCollecting non-branching paths')
             NBPs = []
-            path_limits = defaultdict(list)
             inits = set()
             badEdges = set()
             inits = {v for v, isInit in zip(list(vs), self.multimap(self.is_NBP_init, threads, list(vs), self.DBG, self.seqLimits,
@@ -303,7 +302,7 @@ class Assembler:
 
             ### Write component's input sequences, DBG and NBPG
             if False:
-                oris = {ori for oris in self.multimap(self.get_vertex2origins, threads, list(vs), self.seqPaths, single_thread_threshold = 10000) for ori in oris}
+                oris = {ori for oris in self.multimap(self.get_vertex2origins, threads, list(vs), seqPathsThisComp, single_thread_threshold = 10000) for ori in oris}
                 with open(f'comp_{c+1}.fasta', 'w') as outfile:
                     for ori in oris:
                         outfile.write(f'>{ori}\n{self.seqDict[ori]}\n')
@@ -357,9 +356,9 @@ class Assembler:
                 psets = get_psets(comp2nvs[nc1] | comp2nvs[nc2])
                 assert len(psets) == len(comp2nvs[nc1]) == len(comp2nvs[nc1]) # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
                 # Count
-                names = list(seqPathsRemaining.keys())
+                names = list(seqPathsThisComp.keys())
                 stt = threads if len(psets) > threads else 1000000000
-                for spGS in dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsRemaining, psets, NBP2seq, vertex2NBP, self.seqDict, single_thread_threshold = stt))):
+                for spGS in dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsThisComp, psets, NBP2seq, vertex2NBP, self.seqDict, single_thread_threshold = stt))):
                     for nv in spGS:
                         nv2rightOrientation[nv] += 1            
             
@@ -384,8 +383,8 @@ class Assembler:
                     assert vertex2NBP[nv1] == vertex2NBP[nv2][::-1]
 
                 # Map the input sequences to nodes in the sequence graph (in the original orientation of the input sequence)
-                names = list(seqPathsRemaining.keys())
-                seqPaths_NBPs = dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsRemaining, psets, NBP2seq, vertex2NBP, self.seqDict)))
+                names = list(seqPathsThisComp.keys())
+                seqPaths_NBPs = dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsThisComp, psets, NBP2seq, vertex2NBP, self.seqDict)))
                 seqPaths_NBPs = {name: spGSs for name, spGSs in seqPaths_NBPs.items() if spGSs}
 
                 # Get the times each node in the sequence graph mapped to an input sequence in the original orientation
@@ -590,7 +589,7 @@ class Assembler:
 
                 if mincov:
                     # Compute scaffold coverage
-                    scaffoldCov = np.mean(self.multimap(self.get_vertex2originslen, threads, [v for p in NBPs for v in p], seqPathsRemaining, single_thread_threshold = 10000))
+                    scaffoldCov = np.mean(self.multimap(self.get_vertex2originslen, threads, [v for p in NBPs for v in p], seqPathsThisComp, single_thread_threshold = 10000))
                     msg += f', cov {round(scaffoldCov, 2)}'
                     if mincov and scaffoldCov < mincov:
                         msg += ' (< mincov, IGNORED)'
@@ -612,7 +611,7 @@ class Assembler:
                         if len(ps) > 1: # more than one path with similar start and end
                             bubble_paths_all.extend(ps)
                     if sortBy == 'cov':
-                        path2cov = dict(zip(bubble_paths_all, self.multimap(self.get_avgPathCov, threads, bubble_paths_all, self.seqPaths)))
+                        path2cov = dict(zip(bubble_paths_all, self.multimap(self.get_avgPathCov, threads, bubble_paths_all, seqPathsThisComp)))
                     m1 = 0
                     for (start, end), ps in path_limits.items():
                         
@@ -636,7 +635,7 @@ class Assembler:
                                 if mlen/len(s2) >= bubble_identity_threshold: # note that s2 might be smaller than s1 if sorting by cov, so I should correct this
                                     bubble_paths.add(p2)  
                                     m1 += 1
-                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins(v2, seqPathsRemaining)} )
+                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins(v2, seqPathsThisComp)} )
                             for v1 in p1:
                                 bubble_vertex2origins[v1].update(newOris) # count vertices in p1 as appearing in all of the origins in the bubble paths that we just discarded
                                     
@@ -774,7 +773,7 @@ class Assembler:
                 # Update global results
                     
                 path2id  = {p: (scaffold, i) for i, p in enumerate(NBPs)}
-                ori2covs = self.multimap(self.get_ori2cov, threads, trimmedPaths, seqPathsRemaining, bubble_vertex2origins)
+                ori2covs = self.multimap(self.get_ori2cov, threads, trimmedPaths, seqPathsThisComp, bubble_vertex2origins)
                 # Using trimmedPaths/trimmedSeqs: don't take into account overlaps with other paths for mean cov calculation and origin reporting
                 
                 foundOris = set()
@@ -798,14 +797,9 @@ class Assembler:
                                           origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     addedPaths.add(p)
-                    for ori in ori2cov:
-                        addedSeqs_thiscomponent.add(ori)
 
                 msg += ', done'
                 print_time(msg)
-
-            # Wait until we have finished processing a whole DBG component for this
-            addedSeqs.update(addedSeqs_thiscomponent)
 
         ### Finished!
         return contigs
