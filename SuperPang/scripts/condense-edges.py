@@ -42,14 +42,14 @@ def main():
         name2covLen[name] = (float(fields[5]), len(seq), id_) # add id_ to break ties deterministically
         name2longName[name] = longName
         if name not in name2vertex:
-            v = GS.add_vertex()
+            v = int(GS.add_vertex())
             name2vertex[name] = v
             vertex2name[v] = name
         else:
             v = name2vertex[name]
         for succ in succs:
             if succ not in name2vertex:
-                sv = GS.add_vertex()
+                sv = int(GS.add_vertex())
                 name2vertex[succ] = sv
                 vertex2name[sv] = succ
             else:
