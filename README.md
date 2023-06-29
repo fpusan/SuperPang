@@ -1,6 +1,6 @@
 # SuperPang: non-redundant pangenome assemblies from multiple genomes or bins
 
-**Check our preprint:** Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson S. [Exploring intra-species diversity through non-redundant pangenome assemblies](https://www.biorxiv.org/content/10.1101/2022.03.25.485477v1.full) _bioRxiv_ (2022) DOI: 10.1101/2022.03.25.485477
+**Check our paper:** Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson S. [Exploring intra-species diversity through non-redundant pangenome assemblies](https://onlinelibrary.wiley.com/doi/full/10.1111/1755-0998.13826) _Molecular Ecology Resources_ (2023) DOI: 10.1111/1755-0998.13826
 
 ## Installation
 Requires [graph-tool](https://graph-tool.skewed.de/), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2](https://github.com/lh3/minimap2) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
