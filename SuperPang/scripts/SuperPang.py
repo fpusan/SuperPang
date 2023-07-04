@@ -31,7 +31,7 @@ libpath = dirname(realpath(getfile(Assembler)))
 
 with open(libpath + '/../VERSION') as infile:
     VERSION = infile.read().strip()
-CITATION = 'Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson. Exploring intra-species diversity through non-redundant pangenome assemblies. Molecular Ecology Resources (2023) DOI: 10.1111/1755-0998.13826'
+CITATION = 'Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson S. Exploring intra-species diversity through non-redundant pangenome assemblies. Molecular Ecology Resources (2023) DOI: 10.1111/1755-0998.13826'
 
 class ControlledExit(Exception):
     pass

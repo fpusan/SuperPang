@@ -39,7 +39,8 @@ USE_CYTHON = "--cythonize" in argv # the --cythonize flag will make setup.py fre
 ext = '.pyx' if USE_CYTHON else '.c' # redistribute the c extension when uploading to pypi
 
 extensions = [setuptools.Extension("SuperPang.lib.Compressor", sources=["SuperPang/lib/Compressor"+ext]),
-              setuptools.Extension("SuperPang.lib.cutils", sources=["SuperPang/lib/cutils"+ext])]
+              setuptools.Extension("SuperPang.lib.cutils", sources=["SuperPang/lib/cutils"+ext]),
+              setuptools.Extension("SuperPang.lib.vtools", sources=["SuperPang/lib/vtools"+ext])]
 
 if USE_CYTHON:
     from Cython.Build import cythonize

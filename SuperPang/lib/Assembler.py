@@ -8,6 +8,7 @@ import numpy as np
 
 from SuperPang.lib.utils import read_fasta, write_fasta, print_time
 from SuperPang.lib.cutils import reverse_complement
+from SuperPang.lib.vtools import compress_vertices, vertex_overlap, isInSeqPath
 from SuperPang.lib.Compressor import Compressor
 
 import graph_tool as gt
@@ -82,7 +83,7 @@ class Assembler:
         self.ksize        = ksize
         self.includedSeqs = 0
         #self.spdtest      = Rdict('./test.dict') ###############
-        self.seqPaths     = {} # name: pathSet
+        self.seqPaths     = {} # name: compressedVertices
         self.seqLimits    = set()
 
         ### Read input sequences
@@ -190,7 +191,7 @@ class Assembler:
                             if elapsedSize - lastSize > totalSize/100:
                                 print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases processed, {includedSeqs} sequences, {nVertices} vertices, {nEdges} edges         ', end = '\r')
                                 lastSize = elapsedSize
-                        self.seqPaths[name] = set(sp)
+                        self.seqPaths[name] = compress_vertices(np.array(sp, dtype=np.uint32))
 
 
         ### Populate DBG and cleanup
@@ -245,8 +246,7 @@ class Assembler:
 
             # Get the seqPaths that appear in this DBG component
             #  just check that the first vertex in the seqPath belongs to this component
-            seqPathsThisComp = {name: sp for name, sp in self.seqPaths.items() if iter(sp).__next__() in vs}
-
+            seqPathsThisComp = {name: sp for name, sp in self.seqPaths.items() if sp[0][0] in vs}
             ### Reconstruct non-branching paths
             print_time('\tCollecting non-branching paths')
             NBPs = []
@@ -254,7 +254,6 @@ class Assembler:
             badEdges = set()
             inits = {v for v, isInit in zip(vs, self.multimap(self.is_NBP_init, threads, vs, self.DBG, self.seqLimits,
                                                                      self.vertex2coords, self.ref2name, self.seqDict, self.ksize)) if isInit}
-
 
             # Break cycle if required
             isCycle = False
@@ -336,15 +335,12 @@ class Assembler:
                 
             ### Write component's input sequences, DBG and NBPG
             if False:
-                oris = {ori for oris in self.multimap(self.get_vertex2origins, threads, vs,
-                                                      self.vertex2coords, self.ref2name, self.seqDict, self.ksize,
-                                                      self.mappyref, single_thread_threshold = 10000) \
-                        for ori in oris}
+                oris = {ori for oris in self.multimap(self.get_vertex2origins, threads, list(vs), seqPathsThisComp, single_thread_threshold = 10000) for ori in oris}
                 with open(f'comp_{c+1}.fasta', 'w') as outfile:
                     for ori in oris:
                         outfile.write(f'>{ori}\n{self.seqDict[ori]}\n')
                 self.DBG.vp.vfilt = self.DBG.new_vertex_property('bool')
-                self.set_vertex_filter(self.DBG, vs)
+                self.set_vertex_filter(self.DBG, set(vs))
                 DBG2 = Graph(self.DBG, prune = True)
                 print(f'DBG: {DBG2.num_vertices()} vertices, {DBG2.num_edges()} edges')
                 DBG2.save(f'comp_{c+1}.DBG.graphml')
@@ -358,7 +354,7 @@ class Assembler:
                 """Get a dict with a frozenset of vertices as keys, and the two complementary non-branching paths sharing those vertices as values"""
                 psets = defaultdict(list)
                 for nv in nvs:
-                    pset = frozenset(vertex2NBP[nv]) #### move back to hash(frozenset(
+                    pset = hash(frozenset(vertex2NBP[nv]))
                     psets[pset].append(nv)
                 for nvs_ in psets.values():
                     assert len(nvs_) == 2
@@ -407,9 +403,8 @@ class Assembler:
             for nc in noRC: # for each of those evil components...
 
                 # Find reverse complement Non-Branching Paths
-                psets = get_psets(comp2nvs[nc])               
+                psets = get_psets(comp2nvs[nc])             
                 assert len(psets) == len(comp2nvs[nc]) / 2 # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
-                
                 nv2rc = {}
                 for nv1, nv2 in psets.values():
                     nv2rc[nv1] = nv2
@@ -1012,11 +1007,14 @@ class Assembler:
         """
         names, seqPaths, psets, NBP2seq, vertex2NBP, seqDict = cls.get_multiprocessing_globals()
         name = names[i]
-        path = seqPaths[name]     
+        seqPath = seqPaths[name]     
         
         spGS = set()
         for pset, (nv1, nv2) in psets.items():
-            if pset.issubset(path):
+            NBP = vertex2NBP[nv1]
+            cNBP = compress_vertices(np.array(NBP, dtype=np.uint32))
+            refLen = len(NBP) if NBP[0] != NBP[-1] else len(NBP) - 1 # A NBP will only have duplicated vertices if it is circular
+            if vertex_overlap(cNBP, seqPaths[name]) == refLen: # the pset is a subset of the seqPath.
                 for nv in (nv1, nv2):
                     if NBP2seq[vertex2NBP[nv]] in seqDict[name]: # check the string to make sure that we only add nodes from the same orientation
                         spGS.add(nv)
@@ -1043,15 +1041,6 @@ class Assembler:
         """
         NBPs, seqPaths, bubble_vertex2origins = cls.get_multiprocessing_globals()
         path = NBPs[i]
-
-##        # Pre-screen the seqPaths before the big analysis
-##        # This may save time? It saved 1 second (over 20) for the test dataset...
-##        if len(path) > 10:
-##            pset = {v for i, v in enumerate(path) if not i % 20} | {path[-1]}
-##        else:
-##            pset = {path[0], path[len(path)//2], path[-1]}
-##        candidates = {name: sp for name, sp in seqPaths.items() if pset & sp}
-##        seqPaths = candidates
         
         ori2cov = defaultdict(int)
         for v in path:
@@ -1071,7 +1060,7 @@ class Assembler:
         """
         Return the names of the input sequences that contain a given vertex in the De-Bruijn Graph
         """
-        return {name for name in seqPaths if v in seqPaths[name]}
+        return {name for name in seqPaths if isInSeqPath(v, seqPaths[name])}
 
 
 
