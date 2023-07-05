@@ -39,7 +39,7 @@ cpdef parse_cigar(str cigar):
     cdef float mlen = 0
     cdef unsigned int [:] Larray
     cdef char [:] oparray
-    cdef float iden
+    cdef double iden
     Larray  = clone(array('I'), 100000, False)
     oparray = clone(array('b'), 100000, False)
     for i in range(cLen):

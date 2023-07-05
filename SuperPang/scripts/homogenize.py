@@ -15,6 +15,8 @@ from collections import defaultdict
 from subprocess import call, DEVNULL
 import re
 
+PY_C_CROSSCHECK = False
+
 
 def main(args):
 
@@ -147,6 +149,20 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
             cigar = cigar[5:] #ignore leading cg:Z:
 
             cigLengths, cigOps, idlen, iden = parse_cigar(cigar)
+            if PY_C_CROSSCHECK:
+                cigLengthsPy, cigOpsPy, idlenPy, idenPy = parse_cigar_py(cigar)
+                try:
+                    assert list(cigLengths) == cigLengthsPy
+                    assert list(cigOps) == cigOpsPy
+                    assert idlen == idlenPy
+                    assert round(iden, 2)  == round(idenPy, 2) or abs(1 - iden/idenPy) < 0.01
+                except:
+                    print(list(cigLengths)[1:10], cigLengthsPy[1:10])
+                    print(list(cigOps)[1:10], cigOpsPy[1:10])
+                    print(idlen, idlenPy)
+                    print(sum([L for L, op in zip(cigLengths, cigOps) if op == 61]), sum([L for L, op in zip(cigLengthsPy, cigOpsPy) if op == 61]))
+                    print(round(iden, 6), round(idenPy, 6))
+                    raise
             
             if cigLengths.size == 1 and chr(cigOps[0]) == '=':
                 continue # perfect match, ignore
@@ -203,6 +219,11 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
                                                            mismatch_size_threshold = mismatch_size_threshold,
                                                            indel_size_threshold = indel_size_threshold)
                                            )
+                        if PY_C_CROSSCHECK:
+                            assert correctedSeq[-1] == correct_query_py(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
+                                                                        cigLengths = cigLengths, cigOps = cigOps, isRC = isRC,
+                                                                        mismatch_size_threshold = mismatch_size_threshold,
+                                                                        indel_size_threshold = indel_size_threshold)
                         lastEnd = queryEnd
                     correctedSeq.append( seqs[query][lastEnd:-1] )
 
@@ -233,9 +254,18 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
     return mLen, iLen, oLen, corrected_thisround, nErrors
 
 
+def parse_cigar_py(cigar):
+    cigar   = re.split('(\d+)',cigar)[1:]
+    Larray  = [int(cigar[i])   for i in range(0, len(cigar), 2)]
+    oparray = [ord(cigar[i+1]) for i in range(0, len(cigar), 2)]
+    mlen    = sum([L for L, op in zip(Larray, oparray) if op == 61]) # '='
+    idlen   = sum([L for L, op in zip(Larray, oparray) if op == 61 or op == 88]) # '=' or 'X'
+    iden    = mlen/idlen if idlen else 0
+    return Larray, oparray, idlen, iden
+
 
 #@profile
-def correct_query2(query, queryStart, queryEnd, target, targetStart, targetEnd, cigLengths, cigOps, isRC = False, mismatch_size_threshold = 10, indel_size_threshold = 100):
+def correct_query_py(query, queryStart, queryEnd, target, targetStart, targetEnd, cigLengths, cigOps, isRC = False, mismatch_size_threshold = 10, indel_size_threshold = 100):
     ops = {'=', 'X', 'I', 'D'}
     ngOps = {'=', 'X'}
     query = query if not isRC else reverse_complement(query)
