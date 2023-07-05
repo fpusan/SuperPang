@@ -124,7 +124,8 @@ class Assembler:
         totalSize      = sum(len(seq) for seq in self.seqDict.values())
         elapsedSize    = 0
         lastSize       = 0
-        nVertices      = 0
+        nVertices      = np.uint32(0)
+        one            = np.uint32(1) # This way increasing the nVertices counter may be slightly faster
         nEdges         = 0
 
         with SharedMemoryManager() as smm:
@@ -165,8 +166,8 @@ class Assembler:
                         #  ... so we can't close the pool until we finish going through such generator expression!
                         hashes    = (hashMem.buf[i*clength:(i+1)*clength].tobytes() for i in range(nkmers))
                         # Populate the DBG
-                        sp = []
-                        prev_v, prev_new = -1, False # store the previous vertex here so we can build (prev, v) edge tuples
+                        sp = np.empty(nkmers, dtype = np.uint32)
+                        past_first, prev_v, prev_new = False, -1, False # store the previous vertex here so we can build (prev, v) edge tuples
                         
                         for idx, h in enumerate(hashes):               
                             if h in hash2vertex:
@@ -174,19 +175,19 @@ class Assembler:
                                 v = hash2vertex[h]
                             else:
                                 newVertex = True
-                                v = np.uint32(nVertices)
+                                v = nVertices
                                 hash2vertex[h] = v
                                 self.vertex2coords[v] = (ref, idx)
-                                nVertices += 1
+                                nVertices += one
 
-                            sp.append(v)
+                            sp[idx] = v
                             
-                            if prev_v >= 0 and (newVertex or prev_new):
+                            if past_first and (newVertex or prev_new):
                                 edges[nEdges] = prev_v, v
                                 nEdges += 1
                                 prev = v
 
-                            prev_v, prev_new = v, newVertex
+                            prev_v, prev_new, past_first = v, newVertex, True
                             if idx == 0:
                                 self.seqLimits.add(v)
                             if idx == nkmers - 1:
@@ -197,7 +198,7 @@ class Assembler:
                             if elapsedSize - lastSize > totalSize/100:
                                 print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases processed, {includedSeqs} sequences, {nVertices} vertices, {nEdges} edges         ', end = '\r')
                                 lastSize = elapsedSize
-                        self.seqPaths[name] = compress_vertices(np.array(sp, dtype=np.uint32))
+                        self.seqPaths[name] = compress_vertices(sp)
 
 
         ### Populate DBG and cleanup
@@ -220,6 +221,7 @@ class Assembler:
         self.DBG.ep.efilt = self.DBG.new_edge_property('bool')
         print_time(f'\t100% bases processed, {includedSeqs} sequences, {self.DBG.num_vertices()} vertices, {self.DBG.num_edges()} edges         ')
 
+
 ##    @profile
     def run(self, minlen, mincov, bubble_identity_threshold, genome_assignment_threshold, max_threads):
         """
@@ -233,7 +235,7 @@ class Assembler:
         ### Identify connected components
         print_time('Identifying connected components')
         self.DBG.vp.comp = gt.topology.label_components(self.DBG, directed = False)[0]
-        nComps = len(set(self.DBG.vp.comp))
+        nComps = self.DBG.vp.comp.get_array().max() + 1
         currentScaffold = 0
 
         ### Process connected components
@@ -293,10 +295,10 @@ class Assembler:
                     while True:
                         if p[-1] in inits:
                             break
-                        s = set(self.DBG.get_out_neighbors(p[-1])) - {last, p[-1]} #p[-1] to avoid stopping at self loops
+                        s = [x for x in self.DBG.get_out_neighbors(p[-1]) if x != last and x != p[-1]][0] #p[-1] to avoid stopping at self loops
                         last = p[-1]
-                        s = s.pop()
-                        p.append(np.uint32(s))
+                        p.append(s) # before we casted to np.uint32, but it doesn't seem to make a big difference memory wise and takes a bit.
+                        #p.append(np.uint32(s))
                     p = tuple(p)
                     NBPs.append(p)
 
@@ -1007,8 +1009,8 @@ class Assembler:
         return ''.join(fullseq)
 
     
-
     @classmethod
+##    @profile
     def get_seqPaths_NBPs(cls, i):
         """
         Return the vertices in the Sequence Graph that are contained in a given input sequence in its original orientation
