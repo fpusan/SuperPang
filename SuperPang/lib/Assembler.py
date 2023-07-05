@@ -216,7 +216,7 @@ class Assembler:
         self.DBG = Graph(directed = False)
         self.DBG.add_edge_list(edges[:nEdges])
         del edges
-        self.DBG.vp.comp  = self.DBG.new_vertex_property('int')
+        self.DBG.vp.comp  = self.DBG.new_vertex_property('int16_t')
         self.DBG.ep.efilt = self.DBG.new_edge_property('bool')
         print_time(f'\t100% bases processed, {includedSeqs} sequences, {self.DBG.num_vertices()} vertices, {self.DBG.num_edges()} edges         ')
 
@@ -243,8 +243,7 @@ class Assembler:
                 TGT_COMP = 2
                 if c + 1 != TGT_COMP:
                     continue
-
-            vs = np.array([v for v, c_ in enumerate(self.DBG.vp.comp) if c_ == c], dtype=np.uint32)
+            vs = np.where(self.DBG.vp.comp.get_array() == np.int16(c))[0]
             print_time(f'Working on comp {c+1}/{nComps}, {len(vs)} vertices')
 
             # The overhead of opening a multiprocessing pool increases with resident memory, even if we do nothing inside it
@@ -400,7 +399,7 @@ class Assembler:
                 psets = get_psets(comp2nvs[nc1] | comp2nvs[nc2])
                 assert len(psets) == len(comp2nvs[nc1]) == len(comp2nvs[nc1]) # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
                 # Count
-                names = list(seqPathsThisComp.keys()) #################################### REMOVE seqPathsThisComp (and seqPaths in general)
+                names = list(seqPathsThisComp.keys())
                 stt = threads if len(psets) > threads else 1000000000
                 for spGS in dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsThisComp, psets, NBP2seq, vertex2NBP, self.seqDict, single_thread_threshold = stt))):
                     for nv in spGS:
