@@ -53,6 +53,7 @@ def main(args, temp_prefix):
     ### File names
     input_combined       = f'{temp_prefix}.combined.fasta'
     input_minimap2       = f'{temp_prefix}.pre.minimap2.fasta'
+    diskdb               = f'{temp_prefix}.diskdb' if args.lowmem else None
     params               = args.output_dir + '/params.tsv'
     outputPre_kept       = args.output_dir + '/preliminary/prelim.fasta'
     outputPre2origs_kept = args.output_dir + '/preliminary/prelim2origins.tsv'
@@ -176,7 +177,7 @@ def main(args, temp_prefix):
         input_minimap2 = input_combined          
 
     ### Assemble
-    contigs = Assembler(input_minimap2, args.ksize, args.threads).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads)
+    contigs = Assembler(input_minimap2, args.ksize, args.threads, diskdb).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads)
     if args.keep_intermediate:
         prelim = {}
         with open(outputPre2origs_kept, 'w') as outfile:
@@ -298,8 +299,12 @@ def parse_args():
                         help = 'Number of processors to use')
     parser.add_argument('-o', '--output-dir', type = str, default = 'output',
                         help = 'Output directory')
+    parser.add_argument('-d', '--temp-dir', type = str, default = '/tmp/',
+                        help = 'Temp directory')
     parser.add_argument('--assume-complete', action='store_true',
                         help = 'Assume that the input genomes are complete (--genome-assignment-threshold 0.95 --default-completeness 99)')
+    parser.add_argument('--lowmem', action='store_true',
+                        help = 'Use disk storages instead of memory when possible, reduces memory usage at the cost of execution time')
     parser.add_argument('--minimap2-path', type = str, default = 'minimap2',
                         help = 'Path to the minimap2 executable')
     parser.add_argument('--keep-intermediate', action='store_true',
@@ -320,9 +325,8 @@ def parse_args():
 
 if __name__ == '__main__':
     args        = parse_args()
-    temp_base   = '/tmp/'
     uuid        = uuid4().hex[:7]
-    temp_prefix = f'{temp_base}/{uuid}'
+    temp_prefix = f'{args.temp_dir}/{uuid}'
     try:
         main(args, temp_prefix)
     except ControlledExit:

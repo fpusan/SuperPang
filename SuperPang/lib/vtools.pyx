@@ -25,7 +25,7 @@ cpdef compress_vertices(DTYPE_t [:] vs):
         [intN_start, intN_end]]
     """
     cdef DTYPE_t [:,:] res
-    cdef Py_ssize_t maxz = vs.shape[0]//2 + 1
+    cdef Py_ssize_t maxz = vs.shape[0]//2 + 3
     res = np.empty(shape = ( maxz, 2), dtype = DTYPE)
     cdef bint firstvertex = True
     cdef Py_ssize_t i,v

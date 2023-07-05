@@ -15,10 +15,9 @@ import graph_tool as gt
 from graph_tool.all import Graph
 
 from mappy import Aligner
-from speedict import Rdict #################
+from speedict import Rdict, Options, SliceTransform, PlainTableFactoryOptions
 
 DEBUG = False
-
 
 ### see if we can put NBPG.clear_filters() inside the set filters method, instead of having a lot of them throughout the code
 
@@ -75,14 +74,13 @@ class Assembler:
 
 
 ##    @profile
-    def __init__(self, fasta, ksize, threads):
+    def __init__(self, fasta, ksize, threads, diskdb = None):
         """
         Build a De-Bruijn Graph from an input fasta file
         """
 
         self.ksize        = ksize
         self.includedSeqs = 0
-        #self.spdtest      = Rdict('./test.dict') ###############
         self.seqPaths     = {} # name: compressedVertices
         self.seqLimits    = set()
 
@@ -104,7 +102,15 @@ class Assembler:
 
         ### Set up kmer storage
         self.vertex2coords = np.empty(shape = (max_kmers, 2), dtype = np.uint32)
-        hash2vertex = {}
+        if diskdb:
+            opts = Options()
+            opts.increase_parallelism(threads)
+            opts.set_max_background_jobs(threads)
+            opts.set_prefix_extractor(SliceTransform.create_max_len_prefix(8))
+            opts.set_plain_table_factory(PlainTableFactoryOptions())
+            hash2vertex = Rdict(path = diskdb, options = opts)
+        else:
+            hash2vertex = {}
 
         ### Set up edge storage
         maxint    = np.iinfo(np.uint32).max
@@ -196,6 +202,9 @@ class Assembler:
 
         ### Populate DBG and cleanup
         del seqMem, rcSeqMem, hashMem
+        if diskdb:
+            hash2vertex.close()
+            Rdict.destroy(diskdb, opts)
         del hash2vertex
         self.clear_multiprocessing_globals()
 
