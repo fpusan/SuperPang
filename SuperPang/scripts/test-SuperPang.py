@@ -31,7 +31,7 @@ else:
     files = glob(f'{datapath}/*fna')
     iden = '-i0.95'
 
-args = [superpath,'-f'] + files + ['--assume-complete', iden, '-t12', '--force-overwrite', '-o', output_path, '--minimap2-path', MINIMAP2_PATH]
+args = [superpath,'-f'] + files + ['--assume-complete', iden, '-t12', '--force-overwrite', '-o', output_path, '--minimap2-path', MINIMAP2_PATH, '--debug']
 argss = ' '.join(args)
 print(f'Running SuperPang with command "{argss}"')
 ecode = call(args)

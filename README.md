@@ -46,6 +46,7 @@ test-SuperPang.py
 * *--keep-intermediate*: Keep intermediate files.
 * *--keep-temporary*: Keep temporary files.
 * *--verbose-mOTUpan*: Print out mOTUpan logs.
+* *--debug*: Run additional sanity checks (increases execution time).
 
 ## Output
 * `assembly.fasta`: contigs.
@@ -58,4 +59,4 @@ test-SuperPang.py
 * `params.tsv`: parameters used in the run.
 
 ## About
-*SuperPang* is developed by Fernando Puente-Sánchez (Sveriges lantsbruksuniversitet). Feel free to open an issue or reach out for support [fernando.puente.sanchez@slu.se](mailto:fernando.puente.sanchez@slu.se).
+*SuperPang* is developed by Fernando Puente-Sánchez (Sveriges lantbruksuniversitet). Feel free to open an issue or reach out for support [fernando.puente.sanchez@slu.se](mailto:fernando.puente.sanchez@slu.se).

@@ -15,7 +15,6 @@ from collections import defaultdict
 from subprocess import call, DEVNULL
 import re
 
-PY_C_CROSSCHECK = False
 
 
 def main(args):
@@ -149,7 +148,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
             cigar = cigar[5:] #ignore leading cg:Z:
 
             cigLengths, cigOps, idlen, iden = parse_cigar(cigar)
-            if PY_C_CROSSCHECK:
+            if args.debug:
                 cigLengthsPy, cigOpsPy, idlenPy, idenPy = parse_cigar_py(cigar)
                 try:
                     assert list(cigLengths) == cigLengthsPy
@@ -219,7 +218,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
                                                            mismatch_size_threshold = mismatch_size_threshold,
                                                            indel_size_threshold = indel_size_threshold)
                                            )
-                        if PY_C_CROSSCHECK:
+                        if args.debug:
                             assert correctedSeq[-1] == correct_query_py(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
                                                                         cigLengths = cigLengths, cigOps = cigOps, isRC = isRC,
                                                                         mismatch_size_threshold = mismatch_size_threshold,
@@ -346,6 +345,8 @@ def parse_args():
                         help = 'Path to the minimap2 executable')
     parser.add_argument('--silent', action = 'store_true',
                         help = 'Ignore stderr from minimus2')
+    parser.add_argument('--debug', action = 'store_true',
+                        help = 'Run additional sanity checks (increases execution time)') 
 
     return parser.parse_args()
 

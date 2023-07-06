@@ -17,8 +17,6 @@ from graph_tool.all import Graph
 from mappy import Aligner
 from speedict import Rdict, Options, SliceTransform, PlainTableFactoryOptions
 
-DEBUG = False
-
 ### see if we can put NBPG.clear_filters() inside the set filters method, instead of having a lot of them throughout the code
 
 class Assembler:
@@ -74,7 +72,7 @@ class Assembler:
 
 
 ##    @profile
-    def __init__(self, fasta, ksize, threads, diskdb = None):
+    def __init__(self, fasta, ksize, threads, diskdb = None, debug = False):
         """
         Build a De-Bruijn Graph from an input fasta file
         """
@@ -209,7 +207,7 @@ class Assembler:
         del hash2vertex
         self.clear_multiprocessing_globals()
 
-        if DEBUG:
+        if debug:
             for edge in edges[:nEdges]:
                 if maxint in edge:
                     assert False
@@ -223,7 +221,7 @@ class Assembler:
 
 
 ##    @profile
-    def run(self, minlen, mincov, bubble_identity_threshold, genome_assignment_threshold, max_threads):
+    def run(self, minlen, mincov, bubble_identity_threshold, genome_assignment_threshold, max_threads, debug = False):
         """
         Create contigs from a De-Bruijn Graph
         """
@@ -241,7 +239,7 @@ class Assembler:
         ### Process connected components
         for c in range(nComps):
 
-            if False: # _DEBUG CODE: Skip unwanted components
+            if False: # _debug CODE: Skip unwanted components
                 TGT_COMP = 2
                 if c + 1 != TGT_COMP:
                     continue
@@ -535,7 +533,7 @@ class Assembler:
 
 
                 # Assertions
-                if DEBUG:
+                if debug:
                     subcomp2vertex1 = {snc1: {v for nv in snv1 for v in vertex2NBP[nv]} for snc1, snv1 in subcomps1.items()}
                     subcomp2vertex2 = {snc2: {v for nv in snv2 for v in vertex2NBP[nv]} for snc2, snv2 in subcomps2.items()}
                     v1 = set.union(*list(subcomp2vertex1.values()))
@@ -599,7 +597,7 @@ class Assembler:
                 
 
             # Check that we included all the input vertices
-            if DEBUG:
+            if debug:
                 vs = {np.uint32(v) for v, c_ in enumerate(self.DBG.vp.comp) if c_ == c}
                 assert set(vs) == {v for p in NBPs for v in p}
             # Check that no paths appear in two different scaffolds
@@ -615,7 +613,7 @@ class Assembler:
                 msg = f'\tScaffold {scaffold}, {NBPG.num_vertices()} NBP vertices, {NBPG.num_edges()} NBP edges'
                 print_time(msg, end = '\r')
 
-                if DEBUG:
+                if debug:
                     assert len(set(gt.topology.label_components(NBPG, directed = False)[0])) == 1
 
                 # Compute scaffold length and skip if too short
@@ -801,7 +799,7 @@ class Assembler:
                     assert tp
                     trimmedPaths.append(tp)
 
-                if DEBUG:
+                if debug:
                     vs = {v for p in NBPs for v in p}
                     vst = {v for p in trimmedPaths for v in p}
                     assert vs == vst
@@ -825,7 +823,7 @@ class Assembler:
                 foundOris = set()
 
                 for p, ori2cov, tseq in zip(NBPs, ori2covs, trimmedSeqs):
-                    if DEBUG:
+                    if debug:
                         assert p not in addedPaths
                     id_ = path2id[p]
                     # Even for complete genomes, we can have non-branching paths that belong to the core but don't have full coverage in some sequences
@@ -844,7 +842,7 @@ class Assembler:
                                           origins    = goodOris,
                                           successors = [path2id[succ] for succ in successors[p]])
                     
-                    if DEBUG:
+                    if debug:
                         addedPaths.add(p)
 
                 msg += ', done'

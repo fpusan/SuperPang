@@ -47,6 +47,9 @@ def main(args, temp_prefix):
     print()
     print(CITATION)
     print()
+    if(args.debug):
+        print('Running in debug mode. Execution speed will be slower...')
+        print()
     print()
 
 
@@ -126,6 +129,7 @@ def main(args, temp_prefix):
             for name, bin_ in name2bin.items():
                 outfile.write(f'{name}\t{bin_}\n')
 
+
     ### Ensure the checkm file is available and properly formatted, and parse it
     if not args.checkm:
         completeness = {bin_: args.default_completeness for bin_ in set(name2bin.values())}
@@ -160,6 +164,8 @@ def main(args, temp_prefix):
             command = [path + '/' + 'homogenize.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
                           '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-n', str(args.correction_repeats_min), '-t', str(args.threads),
                           '--minimap2-path', args.minimap2_path, '--silent']
+            if args.debug:
+                command.append('--debug')
             #print(' '.join(command))
             ecode = call(command)
 
@@ -177,7 +183,7 @@ def main(args, temp_prefix):
         input_minimap2 = input_combined          
 
     ### Assemble
-    contigs = Assembler(input_minimap2, args.ksize, args.threads, diskdb).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads)
+    contigs = Assembler(input_minimap2, args.ksize, args.threads, diskdb, args.debug).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads, args.debug)
     if args.keep_intermediate:
         prelim = {}
         with open(outputPre2origs_kept, 'w') as outfile:
@@ -315,6 +321,8 @@ def parse_args():
                         help = 'Print out mOTUpan logs')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Write results even if the output directory already exists')
+    parser.add_argument('--debug', action='store_true',
+                        help = 'Run additional sanity checks (increases execution time)')
     args = parser.parse_args()
     if args.assume_complete:
         args.checkm = None
