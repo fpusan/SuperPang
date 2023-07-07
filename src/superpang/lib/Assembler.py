@@ -6,10 +6,10 @@ from functools import partial
 
 import numpy as np
 
-from SuperPang.lib.utils import read_fasta, write_fasta, print_time
-from SuperPang.lib.cutils import reverse_complement
-from SuperPang.lib.vtools import compress_vertices, vertex_overlap, isInSeqPath
-from SuperPang.lib.Compressor import Compressor
+from superpang.lib.utils import read_fasta, write_fasta, print_time
+from superpang.lib.cutils import reverse_complement
+from superpang.lib.vtools import compress_vertices, vertex_overlap, isInSeqPath
+from superpang.lib.Compressor import Compressor
 
 import graph_tool as gt
 from graph_tool.all import Graph

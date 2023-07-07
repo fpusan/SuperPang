@@ -3,6 +3,8 @@ pangTest.py
 build
 dist
 *egg-info
-SuperPang/lib/*c
-SuperPang/lib/*so
+src/superpang/lib/*c
+src/superpang/lib/*so
+src/superpang/lib/*html
+src/SuperPang.egg-info
 *swp

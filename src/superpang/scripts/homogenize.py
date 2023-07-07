@@ -2,12 +2,13 @@
 
 import sys
 from os.path import dirname, realpath
-path = dirname(realpath(sys.argv[0]))
-sys.path.remove(path)
+path = dirname(realpath(__file__))
+if path in sys.path:
+    sys.path.remove(path)
 sys.path.insert(0, realpath(path + '/../..'))
 
-from SuperPang.lib.utils import read_fastq, write_fastq, fasta2fastq, fastq2fasta, print_time
-from SuperPang.lib.cutils import parse_cigar, correct_query, reverse_complement
+from superpang.lib.utils import read_fastq, write_fastq, fasta2fastq, fastq2fasta, print_time
+from superpang.lib.cutils import parse_cigar, correct_query, reverse_complement
 
 from argparse import ArgumentParser
 
@@ -350,6 +351,10 @@ def parse_args():
 
     return parser.parse_args()
 
-                
-if __name__ == '__main__':
+
+def cli():
     main(parse_args())
+
+
+if __name__ == '__main__':
+    cli()

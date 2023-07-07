@@ -2,9 +2,11 @@
 
 import sys
 from os.path import dirname, realpath
-from os import mkdir
-path = dirname(realpath(sys.argv[0]))
-sys.path.remove(path)
+from os import mkdir, remove
+from shutil import rmtree, copy
+path = dirname(realpath(__file__))
+if path in sys.path:
+    sys.path.remove(path)
 sys.path.insert(0, realpath(path + '/../..'))
 
 try:
@@ -14,8 +16,8 @@ except ModuleNotFoundError:
     sys.exit(1)
 
 
-from SuperPang.lib.Assembler import Assembler
-from SuperPang.lib.utils import read_fasta, write_fasta, print_time
+from superpang.lib.Assembler import Assembler
+from superpang.lib.utils import read_fasta, write_fasta, print_time
 from mOTUlizer.classes.mOTU import mOTU
 from mOTUlizer.utils import parse_checkm
 
@@ -37,7 +39,7 @@ class ControlledExit(Exception):
     pass
 
 
-def main(args, temp_prefix):
+def main(args, uuid):
 
     ### Welcome message
     print()
@@ -54,13 +56,17 @@ def main(args, temp_prefix):
 
 
     ### File names
+    temp_prefix          = f'{args.temp_dir}/{uuid}'
+    corrected_dir        = args.output_dir + '/corrected_input'
+    prelim_dir           = args.output_dir + '/preliminary'
+    temp_saved_dir       = args.output_dir + '/temp'
     input_combined       = f'{temp_prefix}.combined.fasta'
     input_minimap2       = f'{temp_prefix}.pre.minimap2.fasta'
     diskdb               = f'{temp_prefix}.diskdb' if args.lowmem else None
     params               = args.output_dir + '/params.tsv'
-    outputPre_kept       = args.output_dir + '/preliminary/prelim.fasta'
-    outputPre2origs_kept = args.output_dir + '/preliminary/prelim2origins.tsv'
-    name2bin_kept        = args.output_dir + '/preliminary/orig2bin.tsv'
+    outputPre_kept       = prelim_dir      + '/prelim.fasta'
+    outputPre2origs_kept = prelim_dir      + '/prelim2origins.tsv'
+    name2bin_kept        = prelim_dir      + '/orig2bin.tsv'
     outputNodes          = args.output_dir + '/NBPs.fasta'
     outputCore           = args.output_dir + '/NBPs.core.fasta'
     outputAux            = args.output_dir + '/NBPs.accessory.fasta'
@@ -87,17 +93,23 @@ def main(args, temp_prefix):
         else:
             print(f'\nThe directory {args.output_dir} already contains results. Add --force-overwrite to ignore this message.\n')
             raise ControlledExit
+    try:
+        rmtree(corrected_dir)
+    except:
+        pass
+    try:
+        rmtree(prelim_dir)
+    except:
+        pass
+    try:
+        rmtree(temp_saved_dir)
+    except:
+        pass
     if args.keep_intermediate:
-        try:
-            mkdir(args.output_dir + '/corrected_input')
-        except OSError as e:
-            if e.errno != 17:
-                raise
-        try:
-            mkdir(args.output_dir + '/preliminary')
-        except OSError as e:
-            if e.errno != 17:
-                raise
+        mkdir(corrected_dir)
+        mkdir(prelim_dir)
+    if args.keep_temporary:
+        mkdir(temp_saved_dir)
 
 
     ### Log params
@@ -109,6 +121,7 @@ def main(args, temp_prefix):
         outfile.write(f'cond_sha1\t{cond_sha1}\n')
         for arg in vars(args):
             outfile.write(f'{arg}\t{getattr(args, arg)}\n')
+        outfile.write(f'uuid\t{uuid}\n')
 
 
     ### Load sequences
@@ -161,12 +174,11 @@ def main(args, temp_prefix):
                 input_combined = input_minimap2
                 input_minimap2 = f'{input_minimap2}.{i}'
 
-            command = [path + '/' + 'homogenize.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
+            command = [sys.executable, path + '/' + 'homogenize.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
                           '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-n', str(args.correction_repeats_min), '-t', str(args.threads),
                           '--minimap2-path', args.minimap2_path, '--silent']
             if args.debug:
                 command.append('--debug')
-            #print(' '.join(command))
             ecode = call(command)
 
             if ecode:
@@ -174,7 +186,7 @@ def main(args, temp_prefix):
                 raise ControlledExit
                 
         if args.keep_intermediate:
-            outfiles = {bin_: open(f'{args.output_dir}/corrected_input/{bin_}.fasta', 'w') for bin_ in set(name2bin.values())}
+            outfiles = {bin_: open(f'{corrected_dir}/{bin_}.fasta', 'w') for bin_ in set(name2bin.values())}
             for name, seq in read_fasta(input_minimap2).items():
                 outfiles[name2bin[name]].write(f'>{name}\n{seq}\n')
             for of in outfiles.values():
@@ -265,10 +277,14 @@ def main(args, temp_prefix):
 
     ### Condense edges
     print_time('Reconstructing contigs')
-    ecode = call([path + '/' + 'condense-edges.py', outputEdges, outputName, str(args.ksize)])
+    ecode = call([sys.executable, path + '/' + 'condense-edges.py', outputEdges, outputName, str(args.ksize)])
     if ecode:
         print('\nThere was an error running condense-edges.py. Please open an issue\n')
         raise ControlledExit
+
+    if args.keep_temporary:
+        for f in glob(f'{temp_prefix}*'):
+            copy(f, temp_saved_dir)
     
     print_time('Finished')
 
@@ -331,18 +347,18 @@ def parse_args():
     return args
 
 
-if __name__ == '__main__':
+def cli():
     args        = parse_args()
     uuid        = uuid4().hex[:7]
     temp_prefix = f'{args.temp_dir}/{uuid}'
     try:
-        main(args, temp_prefix)
+        main(args, uuid)
     except ControlledExit:
         sys.exit(1)
     finally:
         if not args.keep_temporary:
             call(['rm', '-r'] + glob(f'{temp_prefix}*'), stdout=DEVNULL, stderr=DEVNULL)
 
-
-    
-    
+ 
+if __name__ == '__main__':
+    cli()
