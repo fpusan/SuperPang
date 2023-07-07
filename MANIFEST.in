@@ -1,2 +1,1 @@
-include SuperPang/VERSION
-include SuperPang/test_data/*
+include src/superpang/lib/*pyx

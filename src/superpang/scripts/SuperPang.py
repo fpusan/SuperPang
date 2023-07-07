@@ -2,9 +2,11 @@
 
 import sys
 from os.path import dirname, realpath
-from os import mkdir
-path = dirname(realpath(sys.argv[0]))
-sys.path.remove(path)
+from os import mkdir, remove
+from shutil import rmtree, copy
+path = dirname(realpath(__file__))
+if path in sys.path:
+    sys.path.remove(path)
 sys.path.insert(0, realpath(path + '/../..'))
 
 try:
@@ -14,8 +16,8 @@ except ModuleNotFoundError:
     sys.exit(1)
 
 
-from SuperPang.lib.Assembler import Assembler
-from SuperPang.lib.utils import read_fasta, write_fasta, print_time
+from superpang.lib.Assembler import Assembler
+from superpang.lib.utils import read_fasta, write_fasta, print_time
 from mOTUlizer.classes.mOTU import mOTU
 from mOTUlizer.utils import parse_checkm
 
@@ -24,16 +26,20 @@ from inspect import getfile
 from hashlib import sha1
 from collections import defaultdict
 from subprocess import call, DEVNULL
+from glob import glob
 from argparse import ArgumentParser
 
 libpath = dirname(realpath(getfile(Assembler)))
 
 with open(libpath + '/../VERSION') as infile:
     VERSION = infile.read().strip()
-CITATION = 'Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson. Exploring intra-species diversity through non-redundant pangenome assemblies. Molecular Ecology Resources (2023) DOI: 10.1111/1755-0998.13826'
+CITATION = 'Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson S. Exploring intra-species diversity through non-redundant pangenome assemblies. Molecular Ecology Resources (2023) DOI: 10.1111/1755-0998.13826'
+
+class ControlledExit(Exception):
+    pass
 
 
-def main(args):
+def main(args, uuid):
 
     ### Welcome message
     print()
@@ -43,17 +49,24 @@ def main(args):
     print()
     print(CITATION)
     print()
+    if(args.debug):
+        print('Running in debug mode. Execution speed will be slower...')
+        print()
     print()
 
 
     ### File names
-    uuid = uuid4().hex[:7]
-    input_combined       = f'/tmp/{uuid}.combined.fasta'
-    input_minimap2       = f'/tmp/{uuid}.pre.minimap2.fasta'
+    temp_prefix          = f'{args.temp_dir}/{uuid}'
+    corrected_dir        = args.output_dir + '/corrected_input'
+    prelim_dir           = args.output_dir + '/preliminary'
+    temp_saved_dir       = args.output_dir + '/temp'
+    input_combined       = f'{temp_prefix}.combined.fasta'
+    input_minimap2       = f'{temp_prefix}.pre.minimap2.fasta'
+    diskdb               = f'{temp_prefix}.diskdb' if args.lowmem else None
     params               = args.output_dir + '/params.tsv'
-    outputPre_kept       = args.output_dir + '/preliminary/prelim.fasta'
-    outputPre2origs_kept = args.output_dir + '/preliminary/prelim2origins.tsv'
-    name2bin_kept        = args.output_dir + '/preliminary/orig2bin.tsv'
+    outputPre_kept       = prelim_dir      + '/prelim.fasta'
+    outputPre2origs_kept = prelim_dir      + '/prelim2origins.tsv'
+    name2bin_kept        = prelim_dir      + '/orig2bin.tsv'
     outputNodes          = args.output_dir + '/NBPs.fasta'
     outputCore           = args.output_dir + '/NBPs.core.fasta'
     outputAux            = args.output_dir + '/NBPs.accessory.fasta'
@@ -79,18 +92,24 @@ def main(args):
             pass
         else:
             print(f'\nThe directory {args.output_dir} already contains results. Add --force-overwrite to ignore this message.\n')
-            exit(1)
+            raise ControlledExit
+    try:
+        rmtree(corrected_dir)
+    except:
+        pass
+    try:
+        rmtree(prelim_dir)
+    except:
+        pass
+    try:
+        rmtree(temp_saved_dir)
+    except:
+        pass
     if args.keep_intermediate:
-        try:
-            mkdir(args.output_dir + '/corrected_input')
-        except OSError as e:
-            if e.errno != 17:
-                raise
-        try:
-            mkdir(args.output_dir + '/preliminary')
-        except OSError as e:
-            if e.errno != 17:
-                raise
+        mkdir(corrected_dir)
+        mkdir(prelim_dir)
+    if args.keep_temporary:
+        mkdir(temp_saved_dir)
 
 
     ### Log params
@@ -102,6 +121,7 @@ def main(args):
         outfile.write(f'cond_sha1\t{cond_sha1}\n')
         for arg in vars(args):
             outfile.write(f'{arg}\t{getattr(args, arg)}\n')
+        outfile.write(f'uuid\t{uuid}\n')
 
 
     ### Load sequences
@@ -122,6 +142,7 @@ def main(args):
             for name, bin_ in name2bin.items():
                 outfile.write(f'{name}\t{bin_}\n')
 
+
     ### Ensure the checkm file is available and properly formatted, and parse it
     if not args.checkm:
         completeness = {bin_: args.default_completeness for bin_ in set(name2bin.values())}
@@ -135,7 +156,7 @@ def main(args):
         for bin_ in missing_bins:
             print(bin_)
         print('\nNote that SuperPang expect bin names in the CheckM/completeness file to NOT contain the file extension\n')
-        sys.exit(1)
+        raise ControlledExit()
 
     
     ### Correct input sequences with minimap2
@@ -143,34 +164,38 @@ def main(args):
     if correct:
         # Check for minimap2
         try:
-            call([args.minimap2_path, '-h'], stdout=DEVNULL, stdin=DEVNULL)
+            call([args.minimap2_path, '-h'], stdout=DEVNULL, stderr=DEVNULL)
         except FileNotFoundError:
             print('\nCan\'t find minimap2. Make sure that it is present in your system and that the --minimap2-path is pointing to the executable\n')
-            sys.exit(1)
+            raise ControlledExit
         # Do stuff
         for i in range(1): # support for multiple calls to homogenize, but apparently it made no big difference
             if i:
                 input_combined = input_minimap2
                 input_minimap2 = f'{input_minimap2}.{i}'
-            
-            ecode = call([path + '/' + 'homogenize.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
+
+            command = [sys.executable, path + '/' + 'homogenize.py', '-f', input_combined, '-o', input_minimap2, '-i', str(args.identity_threshold), '-m', str(args.mismatch_size_threshold),
                           '-g', str(args.indel_size_threshold), '-r', str(args.correction_repeats), '-n', str(args.correction_repeats_min), '-t', str(args.threads),
-                          '--minimap2-path', args.minimap2_path, '--silent'])
+                          '--minimap2-path', args.minimap2_path, '--silent']
+            if args.debug:
+                command.append('--debug')
+            ecode = call(command)
+
             if ecode:
                 print('\nThere was an error running homogenize.py. Please open an issue\n')
-                sys,exit(1)
+                raise ControlledExit
                 
         if args.keep_intermediate:
-            outfiles = {bin_: open(f'{args.output_dir}/corrected_input/{bin_}.fasta', 'w') for bin_ in set(name2bin.values())}
+            outfiles = {bin_: open(f'{corrected_dir}/{bin_}.fasta', 'w') for bin_ in set(name2bin.values())}
             for name, seq in read_fasta(input_minimap2).items():
                 outfiles[name2bin[name]].write(f'>{name}\n{seq}\n')
             for of in outfiles.values():
                 of.close()
     else:
-        input_minimap2 = input_combined           
+        input_minimap2 = input_combined          
 
     ### Assemble
-    contigs = Assembler(input_minimap2, args.ksize, args.threads).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads)
+    contigs = Assembler(input_minimap2, args.ksize, args.threads, diskdb, args.debug).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads, args.debug)
     if args.keep_intermediate:
         prelim = {}
         with open(outputPre2origs_kept, 'w') as outfile:
@@ -252,15 +277,15 @@ def main(args):
 
     ### Condense edges
     print_time('Reconstructing contigs')
-    ecode = call([path + '/' + 'condense-edges.py', outputEdges, outputName, str(args.ksize)])
+    ecode = call([sys.executable, path + '/' + 'condense-edges.py', outputEdges, outputName, str(args.ksize)])
     if ecode:
         print('\nThere was an error running condense-edges.py. Please open an issue\n')
-        sys,exit(1)
+        raise ControlledExit
 
-    ### Cleanup
-    call(['rm', input_combined])
-    if correct:
-        call(['rm', input_minimap2])
+    if args.keep_temporary:
+        for f in glob(f'{temp_prefix}*'):
+            copy(f, temp_saved_dir)
+    
     print_time('Finished')
 
 
@@ -296,16 +321,24 @@ def parse_args():
                         help = 'Number of processors to use')
     parser.add_argument('-o', '--output-dir', type = str, default = 'output',
                         help = 'Output directory')
+    parser.add_argument('-d', '--temp-dir', type = str, default = '/tmp/',
+                        help = 'Temp directory')
     parser.add_argument('--assume-complete', action='store_true',
                         help = 'Assume that the input genomes are complete (--genome-assignment-threshold 0.95 --default-completeness 99)')
+    parser.add_argument('--lowmem', action='store_true',
+                        help = 'Use disk storages instead of memory when possible, reduces memory usage at the cost of execution time')
     parser.add_argument('--minimap2-path', type = str, default = 'minimap2',
                         help = 'Path to the minimap2 executable')
     parser.add_argument('--keep-intermediate', action='store_true',
                         help = 'Keep intermediate files')
+    parser.add_argument('--keep-temporary', action='store_true',
+                        help = 'Keep temporary files')
     parser.add_argument('--verbose-mOTUpan', action='store_true',
                         help = 'Print out mOTUpan logs')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Write results even if the output directory already exists')
+    parser.add_argument('--debug', action='store_true',
+                        help = 'Run additional sanity checks (increases execution time)')
     args = parser.parse_args()
     if args.assume_complete:
         args.checkm = None
@@ -314,8 +347,18 @@ def parse_args():
     return args
 
 
-if __name__ == '__main__':
-    main(parse_args())
+def cli():
+    args        = parse_args()
+    uuid        = uuid4().hex[:7]
+    temp_prefix = f'{args.temp_dir}/{uuid}'
+    try:
+        main(args, uuid)
+    except ControlledExit:
+        sys.exit(1)
+    finally:
+        if not args.keep_temporary:
+            call(['rm', '-r'] + glob(f'{temp_prefix}*'), stdout=DEVNULL, stderr=DEVNULL)
 
-    
-    
+ 
+if __name__ == '__main__':
+    cli()

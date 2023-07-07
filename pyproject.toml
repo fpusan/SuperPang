@@ -1,0 +1,64 @@
+[project]
+
+name = "SuperPang"
+
+dynamic = ["version"]
+
+authors = [
+  { name="Fernando Puente-Sánchez", email="fernando.puente.sanchez@slu.se" },
+]
+
+description = "Non-redundant pangenome assemblies from multiple genomes or bins"
+
+readme = "README.md"
+
+license = {file = "LICENSE"}
+
+requires-python = ">=3.8"
+
+classifiers = [
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: BSD License",
+        "Operating System :: OS Independent",
+        "Intended Audience :: Science/Research",
+        "Topic :: Scientific/Engineering :: Bio-Informatics"
+]
+
+keywords = ["bioinformatics", "assembly", "metagenomics", "microbial-genomics", "genomics"]
+
+dependencies = [
+  "numpy",
+  "mOTUlizer==0.2.4",
+  "mappy",
+  "speedict"
+] # we also need graph-tool but we need conda for that, and minimus2 but it is not a python package
+
+
+[project.urls]
+"Homepage" = "https://github.com/fpusan/SuperPang"
+"Bug Tracker" = "https://github.com/fpusan/SuperPang/issues"
+
+[project.scripts]
+"SuperPang.py"  = "superpang.scripts.SuperPang:cli"
+"homogenize.py" = "superpang.scripts.homogenize:cli"
+"test-SuperPang.py" = "superpang.scripts.test_SuperPang:main"
+# We need an underscore in test_SuperPang because now we treat it as a module
+#  rather than an executable, and we can import with a dash on its name...
+
+[tool.setuptools]
+# If there are data files included in your packages that need to be
+# installed, specify them here.
+include-package-data = true
+
+#[tool.setuptools.packages.find]
+#where = ["src"]
+
+[tool.setuptools.package-data]
+"superpang.test_data" = ["*.fna"]
+
+[tool.setuptools.dynamic]
+version = {file = ["src/superpang/VERSION"]}
+
+[build-system]
+requires = ["setuptools>=61.0", "numpy", "cython"]
+build-backend = "setuptools.build_meta"

@@ -2,18 +2,17 @@ from datetime import datetime
 import resource
 
 
-def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore'):
+def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore', split_name = True):
     assert Ns in ('ignore', 'split')
     assert ambigs in ('ignore', 'as_Ns')
-    ambig2N = {ord(a): ord('N') for a in ('R', 'Y', 'K', 'M', 'S', 'W', 'B', 'D', 'H', 'V')} # ord bc str.translate wants ascii codes
-    allowedChars = {'A', 'C', 'T', 'G', 'N'}
     seqDict = {}
     for seq in open(fasta).read().strip().lstrip('>').split('>'):
         name, seq = seq.split('\n',1)
+        if split_name:
+            name = name.split(' ')[0]
         seq = seq.upper().replace('\n','').replace('.','').replace('-','').replace('U','A')
         if ambigs == 'as_Ns': # just translate the
-            seq = seq.translate(ambig2N)
-            assert set(seq).issubset(allowedChars)
+            seq = fix_Ns(seq)
         s = 0
         if name in seqDict:
             raise Exception(f'Sequence "{name}" is duplicated in your input file')
@@ -31,12 +30,15 @@ def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore'):
     return seqDict
 
 
-def read_fastq(fastq):
+def read_fastq(fastq, ambigs = 'ignore'):
+    assert ambigs in ('ignore', 'as_Ns')
     seqDict = {}
     with open(fastq) as infile:
         while True:
             name = infile.readline().strip().lstrip('@')
             seq = infile.readline().strip()
+            if ambigs == 'as_Ns':
+                seq = fix_Ns(seq)
             sep = infile.readline().strip()
             qual = infile.readline().strip()
             if not name:
@@ -45,6 +47,16 @@ def read_fastq(fastq):
                 raise Exception(f'Sequence "{name}" is duplicated in your input file')
             seqDict[name] = seq
     return seqDict
+
+
+ambig2N = {ord(a): ord('N') for a in ('R', 'Y', 'K', 'M', 'S', 'W', 'B', 'D', 'H', 'V')} # ord bc str.translate wants ascii codes
+allowedChars = {'A', 'C', 'T', 'G', 'N'}
+def fix_Ns(seq):
+    seq = seq.translate(ambig2N)
+    if not set(seq).issubset(allowedChars):
+        badChars = set(seq) - allowedChars
+        raise ValueError(f'Illegal chars in seq "{name}": {badChars}')
+    return seq
 
 
 def write_fasta(seqDict, fasta):
@@ -68,13 +80,12 @@ def fasta2fastq(fasta, fastq):
 def fastq2fasta(fastq, fasta):
     write_fasta(read_fastq(fastq), fasta)
 
+base_for = 'ACGTN'
+base_rev = 'TGCAN'
+comp_tab = str.maketrans(base_for, base_rev)
 
 def reverse_complement(seq):
-    complementarity_matrix = {'A':'T', 'C':'G', 'T':'A', 'G':'C', 'N':'N', 
-                              'W':'W', 'S':'S', 'R':'Y', 'Y':'R', 'M':'K', 
-                              'K':'M', 'B':'V', 'V':'B', 'D':'H', 'H':'D',
-                              '-':'-', '.':'.'}
-    return ''.join([complementarity_matrix[b] for b in seq[::-1]])
+    return seq.translate(comp_tab)[::-1]
 
 
 

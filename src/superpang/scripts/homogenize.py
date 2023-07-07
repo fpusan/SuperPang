@@ -2,17 +2,20 @@
 
 import sys
 from os.path import dirname, realpath
-path = dirname(realpath(sys.argv[0]))
-sys.path.remove(path)
+path = dirname(realpath(__file__))
+if path in sys.path:
+    sys.path.remove(path)
 sys.path.insert(0, realpath(path + '/../..'))
 
-from SuperPang.lib.utils import read_fastq, write_fastq, fasta2fastq, fastq2fasta, reverse_complement, print_time
+from superpang.lib.utils import read_fastq, write_fastq, fasta2fastq, fastq2fasta, print_time
+from superpang.lib.cutils import parse_cigar, correct_query, reverse_complement
 
 from argparse import ArgumentParser
 
 from collections import defaultdict
 from subprocess import call, DEVNULL
 import re
+
 
 
 def main(args):
@@ -58,11 +61,11 @@ def main(args):
 
     fastq2fasta(current1, args.output)
 
-
+#@profile
 def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, correction_tries, identity_threshold, mismatch_size_threshold, indel_size_threshold):
 
     seqOrderOriginal = []
-    seqs = read_fastq(infastq)
+    seqs = read_fastq(infastq, ambigs = 'as_Ns')
     seqOrderOriginal = list(seqs.keys()) # trust that dict remembers insertion order
     sortedSeqs = list(sorted(seqs, key = lambda a: len(seqs[a]), reverse = True))
     lexi = list(sorted((f'{i}' for i in range(len(sortedSeqs))), reverse = True))
@@ -143,23 +146,33 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
             queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual = map(int, [queryLen, queryStart, queryEnd, targetLen, targetStart, targetEnd, matches, alignLen, qual])
                 
             isRC = isRC == '-'
-            cigar = cigar.replace('cg:Z:','')
-            cigar = re.split('(\d+)',cigar)[1:]
-            cigar = [(int(cigar[i]), cigar[i+1]) for i in range(0, len(cigar), 2)]
-            idlen = sum([L for L, op in cigar if op in {'=', 'X'}])
+            cigar = cigar[5:] #ignore leading cg:Z:
 
-            if len(cigar) == 1 and cigar[0][1] == '=':
+            cigLengths, cigOps, idlen, iden = parse_cigar(cigar)
+            if args.debug:
+                cigLengthsPy, cigOpsPy, idlenPy, idenPy = parse_cigar_py(cigar)
+                try:
+                    assert list(cigLengths) == cigLengthsPy
+                    assert list(cigOps) == cigOpsPy
+                    assert idlen == idlenPy
+                    assert round(iden, 2)  == round(idenPy, 2) or abs(1 - iden/idenPy) < 0.01
+                except:
+                    print(list(cigLengths)[1:10], cigLengthsPy[1:10])
+                    print(list(cigOps)[1:10], cigOpsPy[1:10])
+                    print(idlen, idlenPy)
+                    print(sum([L for L, op in zip(cigLengths, cigOps) if op == 61]), sum([L for L, op in zip(cigLengthsPy, cigOpsPy) if op == 61]))
+                    print(round(iden, 6), round(idenPy, 6))
+                    raise
+            
+            if cigLengths.size == 1 and chr(cigOps[0]) == '=':
                 continue # perfect match, ignore
-
-            if sum([L for L, op in cigar if op == '=']) / idlen < identity_threshold:
+            
+            if iden < identity_threshold:
                 continue # too many mismatches, ignore (indels are not counted here)
-
-##            if sum([L for L, op in cigar if op == '=']) / alignLen < identity_threshold:
-##                continue # too mamy mismatches and indels
 
             assert targetLen >= queryLen
 
-            overlaps[target][query].append( ( queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen) )
+            overlaps[target][query].append( ( queryStart, queryEnd, targetStart, targetEnd, cigLengths, cigOps, isRC, matches, idlen, alignLen) )
         
         # query is the sequence we want to correct, target is the template
         # before we were using target0 and query0, but the code should work even if we kept using query and target as variable names
@@ -173,22 +186,21 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
                 if query in corrected_previously:
                     assert target not in corrected_previously[query]
 
-                #print(ori2minimap[target], ori2minimap[query], len(ols)) ####################
                 # Ensure that the different regions to correct do not overlap
                 fullCorrection = True
                 ols = sorted(ols, key = lambda x: x[0]) # sort by query start
                 lastEnd = -1
                 goodOls = []
-                for queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen in ols:
+                for queryStart, queryEnd, targetStart, targetEnd, cigLengths, cigOps, isRC, matches, idlen, alignLen in ols:
                     if queryStart > lastEnd:
-                        goodOls.append( (queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen) )
+                        goodOls.append( (queryStart, queryEnd, targetStart, targetEnd, cigLengths, cigOps, isRC, matches, idlen, alignLen) )
                         lastEnd = queryEnd
                     else:
                         fullCorrection = False
 
                 # Double-check
                 lastEnd = -1
-                for queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen in goodOls:
+                for queryStart, queryEnd, targetStart, targetEnd, cigLengths, cigOps, isRC, matches, idlen, alignLen in goodOls:
                     assert queryStart > lastEnd
                     lastEnd = queryEnd
         
@@ -200,11 +212,18 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
                 try:
                     correctedSeq = []
                     lastEnd = 0
-                    for  queryStart, queryEnd, targetStart, targetEnd, cigar, isRC, matches, idlen, alignLen in goodOls:
+                    for  queryStart, queryEnd, targetStart, targetEnd, cigLengths, cigOps, isRC, matches, idlen, alignLen in goodOls:
                         correctedSeq.append(seqs[query][lastEnd:queryStart])
                         correctedSeq.append( correct_query(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
-                                                           cigar = cigar, isRC = isRC, mismatch_size_threshold = mismatch_size_threshold, indel_size_threshold = indel_size_threshold)
+                                                           cigLengths = cigLengths, cigOps = cigOps, isRC = isRC,
+                                                           mismatch_size_threshold = mismatch_size_threshold,
+                                                           indel_size_threshold = indel_size_threshold)
                                            )
+                        if args.debug:
+                            assert correctedSeq[-1] == correct_query_py(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
+                                                                        cigLengths = cigLengths, cigOps = cigOps, isRC = isRC,
+                                                                        mismatch_size_threshold = mismatch_size_threshold,
+                                                                        indel_size_threshold = indel_size_threshold)
                         lastEnd = queryEnd
                     correctedSeq.append( seqs[query][lastEnd:-1] )
 
@@ -215,8 +234,9 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
                     else:
                         correction_tries[(query, target)] += 1
 
-                except AssertionError: # we failed some assertion in correct_query. I checked a case and it was actually because the alignment/CIGAR string generated by minimap2 was wrong
+                except ValueError: # we failed some assertion in correct_query. I checked a case and it was actually because the alignment/CIGAR string generated by minimap2 was wrong
                     nErrors += 1        # so we just ignore this correction completely
+
 
 
     for header in seqs:
@@ -230,36 +250,38 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
             outfile.write(f'@{header}\n{seq}\n+\n{quals}\n')
 
     print_time(' '*40, end = '\r')
-    
+ 
     return mLen, iLen, oLen, corrected_thisround, nErrors
 
 
-
-def switch_cigar(cigar): # unused
-    newCigar = []
-    for L, op in cigar:
-        if op == 'D':
-            op = 'I'
-        elif op == 'I':
-            op = 'D'
-        newCigar.append( (L, op) )
-    return newCigar
+def parse_cigar_py(cigar):
+    cigar   = re.split('(\d+)',cigar)[1:]
+    Larray  = [int(cigar[i])   for i in range(0, len(cigar), 2)]
+    oparray = [ord(cigar[i+1]) for i in range(0, len(cigar), 2)]
+    mlen    = sum([L for L, op in zip(Larray, oparray) if op == 61]) # '='
+    idlen   = sum([L for L, op in zip(Larray, oparray) if op == 61 or op == 88]) # '=' or 'X'
+    iden    = mlen/idlen if idlen else 0
+    return Larray, oparray, idlen, iden
 
 
-def correct_query(query, queryStart, queryEnd, target, targetStart, targetEnd, cigar, isRC = False, mismatch_size_threshold = 10, indel_size_threshold = 100):
+#@profile
+def correct_query_py(query, queryStart, queryEnd, target, targetStart, targetEnd, cigLengths, cigOps, isRC = False, mismatch_size_threshold = 10, indel_size_threshold = 100):
     ops = {'=', 'X', 'I', 'D'}
+    ngOps = {'=', 'X'}
     query = query if not isRC else reverse_complement(query)
     queryPos = queryStart if not isRC else len(query) - queryEnd
     targetPos = targetStart
     correction = []
         
-    for i, (L, op) in enumerate(cigar):
-        assert op in ops
-        if op == '=' or op == 'X':
+    for i, (L, op) in enumerate(zip(cigLengths, cigOps)):
+        op = chr(op)
+##        assert op in ops
+        if op in ngOps: #op == '=' or op == 'X':
             queryFrag = query[queryPos:queryPos+L]
             newFrag = target[targetPos:targetPos+L]
             if op == '=':
-                assert newFrag == queryFrag
+                if newFrag != queryFrag:
+                    raise ValueError
 ##                try:
 ##                    assert newFrag == queryFrag
 ##                except:
@@ -324,9 +346,15 @@ def parse_args():
                         help = 'Path to the minimap2 executable')
     parser.add_argument('--silent', action = 'store_true',
                         help = 'Ignore stderr from minimus2')
+    parser.add_argument('--debug', action = 'store_true',
+                        help = 'Run additional sanity checks (increases execution time)') 
 
     return parser.parse_args()
 
-                
-if __name__ == '__main__':
+
+def cli():
     main(parse_args())
+
+
+if __name__ == '__main__':
+    cli()

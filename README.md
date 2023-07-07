@@ -1,9 +1,10 @@
 # SuperPang: non-redundant pangenome assemblies from multiple genomes or bins
 
 **Check our paper:** Puente-Sánchez F, Hoetzinger M, Buck M and Bertilsson S. [Exploring intra-species diversity through non-redundant pangenome assemblies](https://onlinelibrary.wiley.com/doi/full/10.1111/1755-0998.13826) _Molecular Ecology Resources_ (2023) DOI: 10.1111/1755-0998.13826
+_... but note that performance is now better (3x less memory usage, 20% faster execution time) than when we first benchmarked Superpang.
 
 ## Installation
-Requires [graph-tool](https://graph-tool.skewed.de/), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2](https://github.com/lh3/minimap2) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
+Requires [graph-tool](https://graph-tool.skewed.de/), [speedict](https://github.com/Congyuwang/RocksDict), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2](https://github.com/lh3/minimap2) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
 ```
 # Install into a new conda environment
 conda create -n SuperPang -c conda-forge -c bioconda -c fpusan superpang
@@ -39,10 +40,14 @@ test-SuperPang.py
 * *-x/--default-completeness*: Default genome completeness to assume if a CheckM output is not provided with *--checkm*. Default `70`.
 * *-t/--threads*: Number of processors to use. Default `1`.
 * *-o/--output*: Output directory. Default `output`.
+* *-d/--temp-dir*: Directory for temp files. Default `tmp`.
 * *--assume-complete*: Assume that the input genomes are complete (*--genome-assignment-threshold 0.95*, *--default-completeness 99*).
+* *--lowmem*: Use disk storages instead of memory when possible, reduces memory usage at the cost of execution time.
 * *--minimap2-path*: Path to the minimap2 executable. Default `minimap2`.
 * *--keep-intermediate*: Keep intermediate files.
+* *--keep-temporary*: Keep temporary files.
 * *--verbose-mOTUpan*: Print out mOTUpan logs.
+* *--debug*: Run additional sanity checks (increases execution time).
 
 ## Output
 * `assembly.fasta`: contigs.
@@ -55,4 +60,4 @@ test-SuperPang.py
 * `params.tsv`: parameters used in the run.
 
 ## About
-*SuperPang* is developed by Fernando Puente-Sánchez (Sveriges lantsbruksuniversitet). Feel free to open an issue or reach out for support [fernando.puente.sanchez@slu.se](mailto:fernando.puente.sanchez@slu.se).
+*SuperPang* is developed by Fernando Puente-Sánchez (Sveriges lantbruksuniversitet). Feel free to open an issue or reach out for support [fernando.puente.sanchez@slu.se](mailto:fernando.puente.sanchez@slu.se).
