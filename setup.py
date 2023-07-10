@@ -7,7 +7,8 @@ extensions = [setuptools.Extension("superpang.lib.Compressor", sources=["src/sup
 
 setuptools.setup(
     ext_modules = cythonize(extensions),
-    setup_requires = ['cython']
+    setup_requires = ['cython'],
+    version = open('src/superpang/VERSION').read().strip()
     )
 
 
