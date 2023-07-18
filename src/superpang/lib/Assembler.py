@@ -81,14 +81,15 @@ class Assembler:
         self.includedSeqs = 0
         self.seqPaths     = {} # name: compressedVertices
         self.seqLimits    = set()
+        MAX_KMER_CUTOFF   = 1000000000
 
         ### Read input sequences
         print_time('Reading sequences')
         self.seqDict = read_fasta(fasta, ambigs = 'as_Ns', Ns = 'split')
         nNs = len({name.split('_Nsplit_')[0] for name in self.seqDict})
         self.ref2name = list(self.seqDict)
-        max_kmers = sum(len(seq) - self.ksize + 1 for seq in self.seqDict.values())
-        max_kmers = max_kmers if max_kmers < 1000000000 else 1000000000
+        max_kmers = sum(len(seq) - self.ksize + 1 for seq in self.seqDict.values() if len(seq) > self.ksize)
+        max_kmers = max_kmers if max_kmers < MAX_KMER_CUTOFF else MAX_KMER_CUTOFF
 
         print_time('Allocating resources')
         ### Kmer hashing related parameters
@@ -96,7 +97,6 @@ class Assembler:
         clength = self.ksize // 4 + self.ksize % 4                # the length of a hash
         maxseqlength = max(len(s) for s in self.seqDict.values()) # length of the largest input sequence
         maxnkmers = maxseqlength-self.ksize+1                     # number of kmers in the largest input sequence
-
 
         ### Set up kmer storage
         self.vertex2coords = np.empty(shape = (max_kmers, 2), dtype = np.uint32)
@@ -124,7 +124,8 @@ class Assembler:
         lastSize       = 0
         nVertices      = np.uint32(0)
         one            = np.uint32(1) # This way increasing the nVertices counter may be slightly faster
-        nEdges         = 0
+        nEdges         = 0 # actual edges added so far (includes duplicated edges)
+        nEdges_ndEst   = 0 # estimate of non-duplicated edges added
 
         with SharedMemoryManager() as smm:
             # seqMem and rcSeqMem are two shared mem buffers that will hold the fwd and rev sequences
@@ -165,9 +166,9 @@ class Assembler:
                         hashes    = (hashMem.buf[i*clength:(i+1)*clength].tobytes() for i in range(nkmers))
                         # Populate the DBG
                         sp = np.empty(nkmers, dtype = np.uint32)
-                        past_first, prev_v, prev_new = False, -1, False # store the previous vertex here so we can build (prev, v) edge tuples
+                        prev_v, prev_new, past_first = -1, False, False # store the previous vertex here so we can build (prev, v) edge tuples
                         
-                        for idx, h in enumerate(hashes):               
+                        for idx, h in enumerate(hashes):
                             if h in hash2vertex:
                                 newVertex = False
                                 v = hash2vertex[h]
@@ -180,10 +181,11 @@ class Assembler:
 
                             sp[idx] = v
                             
-                            if past_first and (newVertex or prev_new):
+                            if past_first:# and (newVertex or prev_new): ############################################
                                 edges[nEdges] = prev_v, v
                                 nEdges += 1
-                                prev = v
+                                if (newVertex or prev_new): # Just so we have an ongoing estimate of the unique edges added so far
+                                    nEdges_ndEst += 1       # could remove this for extra efficiency
 
                             prev_v, prev_new, past_first = v, newVertex, True
                             if idx == 0:
@@ -194,10 +196,22 @@ class Assembler:
                             elapsedSize += 1
                             
                             if elapsedSize - lastSize > totalSize/100:
-                                print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases processed, {includedSeqs} sequences, {nVertices} vertices, {nEdges} edges         ', end = '\r')
+                                print_time(f'\t{round(100*elapsedSize/totalSize, 2)}% bases processed, {includedSeqs} sequences, {nVertices} vertices, {nEdges_ndEst} edges         ', end = '\r')
                                 lastSize = elapsedSize
-                        self.seqPaths[name] = compress_vertices(sp)
 
+                        
+                        self.seqPaths[name] = compress_vertices(sp)
+                        if max_kmers == MAX_KMER_CUTOFF and nEdges / max_kmers > 0.75: # Pack the edge array by removing duplicates if we are size-capped and close to filling it
+                            edges  = edges[:nEdges]
+                            edges.sort(axis=1)                     # Sort each row so duplicated edges in opposite directions (e.g. 2,3 and 3,2) become identical (2,3 and 2,3)
+                            edges  = np.unique(edges, axis=0)      # Deduplicate
+                            nEdges = nEdges_ndEst = edges.shape[0] # Adjust to the number of deduplicated edges
+                            ext    = np.empty(shape = (max_kmers - nEdges, 2), dtype = np.uint32)              
+                            ext[:] = maxint
+                            edges  = np.vstack((edges, ext))       # Add empty space up to max_kmers  
+                        if debug:
+                            assert idx+1 == nkmers
+                            assert edges.shape[0] == max_kmers
 
         ### Populate DBG and cleanup
         del seqMem, rcSeqMem, hashMem
@@ -211,9 +225,14 @@ class Assembler:
             for edge in edges[:nEdges]:
                 if maxint in edge:
                     assert False
+
+        self.vertex2coords = self.vertex2coords[:nVertices]
+        edges = edges[:nEdges]
+        edges.sort(axis=1)               # Sort each row so duplicated edges in opposite directions (e.g. 2,3 and 3,2) become identical (2,3 and 2,3)
+        edges = np.unique(edges, axis=0) # Deduplicate
         
         self.DBG = Graph(directed = False)
-        self.DBG.add_edge_list(edges[:nEdges])
+        self.DBG.add_edge_list(edges)
         del edges
         self.DBG.vp.comp  = self.DBG.new_vertex_property('int16_t')
         self.DBG.ep.efilt = self.DBG.new_edge_property('bool')
