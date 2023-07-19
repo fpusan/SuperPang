@@ -181,7 +181,7 @@ class Assembler:
 
                             sp[idx] = v
                             
-                            if past_first:# and (newVertex or prev_new): ############################################
+                            if past_first:
                                 edges[nEdges] = prev_v, v
                                 nEdges += 1
                                 if (newVertex or prev_new): # Just so we have an ongoing estimate of the unique edges added so far
@@ -252,18 +252,20 @@ class Assembler:
         ### Identify connected components
         print_time('Identifying connected components')
         self.DBG.vp.comp = gt.topology.label_components(self.DBG, directed = False)[0]
-        nComps = self.DBG.vp.comp.get_array().max() + 1
+        comps, sizes = np.unique(self.DBG.vp.comp.get_array(), return_counts=True) # Process from larger to smaller
+        comps = [comp for comp, size in sorted(zip(comps, sizes), key = lambda x: x[1], reverse = True)]
+        nComps = len(comps)
+
         currentScaffold = 0
 
         ### Process connected components
-        for c in range(nComps):
-
+        for ic, c in enumerate(comps):
             if False: # _debug CODE: Skip unwanted components
-                TGT_COMP = 2
+                TGT_COMP = 8
                 if c + 1 != TGT_COMP:
                     continue
             vs = np.where(self.DBG.vp.comp.get_array() == np.int16(c))[0]
-            print_time(f'Working on comp {c+1}/{nComps}, {len(vs)} vertices')
+            print_time(f'Working on comp {ic+1}/{nComps}, {len(vs)} vertices')
 
             # The overhead of opening a multiprocessing pool increases with resident memory, even if we do nothing inside it
             #  so I don't think this is due to COW being triggered, just something the way fork and/or python multiprocessing pool works
@@ -281,7 +283,6 @@ class Assembler:
             badEdges = set()
             inits = {v for v, isInit in zip(vs, self.multimap(self.is_NBP_init, threads, vs, self.DBG, self.seqLimits,
                                                                      self.vertex2coords, self.ref2name, self.seqDict, self.ksize)) if isInit}
-
             # Break cycle if required
             isCycle = False
             ignoreEdge = set()
@@ -306,59 +307,62 @@ class Assembler:
                 self.DBG.set_edge_filter(self.DBG.ep.efilt)
                     
             for j, ini in enumerate(inits):
-                for n in set(self.DBG.get_out_neighbors(ini)):
-                    p = [ini, n]
+                for n in set(sorted(self.DBG.get_out_neighbors(ini))):
+                    NBP = [ini, n]
                     last = ini
                     while True:
-                        if p[-1] in inits:
+                        if NBP[-1] in inits:
                             break
-                        s = [x for x in self.DBG.get_out_neighbors(p[-1]) if x != last and x != p[-1]][0] #p[-1] to avoid stopping at self loops
-                        last = p[-1]
-                        p.append(s) # before we casted to np.uint32, but it doesn't seem to make a big difference memory wise and takes a bit.
-                        #p.append(np.uint32(s))
-                    p = tuple(p)
-                    NBPs.append(p)
+                        s = [x for x in self.DBG.get_out_neighbors(NBP[-1]) if x != last and x != NBP[-1]][0] #NBP[-1] to avoid stopping at self loops
+                        last = NBP[-1]
+                        NBP.append(s) # before we casted to np.uint32, but it doesn't seem to make a big difference memory wise and takes a bit.
+                        #NBP.append(np.uint32(s))
+                    NBP = tuple(NBP)
+                    NBPs.append(NBP)
 
             if isCycle: # make them circular by adding the first vertex also in the end so there's an overlap
                 assert len(NBPs) == 2
                 NBPs = [NBP+(NBP[0],) for NBP in NBPs]
 
             # Check that there are no len==1 NBPs
-            for p in NBPs:
-                assert len(p) > 1
+            for NBP in NBPs:
+                assert len(NBP) > 1
 
             ### Build a graph of connected non-branching paths, and split into fwd and rev component
             print_time(f'\tBuilding sequence graph out of {len(NBPs)} non-branching paths')
 
             # Remove NBPs with terminally duplicated vertices
             # Those broke our code once. we had three nvs with NBPs (0,0,1,2) (0,1,2) and (2,1,0) under the same pset (see below)
-            NBPs = [p for p in NBPs if p[0] != p[1] and p[-1] != p[-2]]
+            NBPs = [NBP for NBP in NBPs if NBP[0] != NBP[1] and NBP[-1] != NBP[-2]]
 
             # Translate NBPs into sequences
             NBP2seq = dict(zip(NBPs, self.multimap(self.reconstruct_sequence, threads, NBPs, self.vertex2coords, self.ref2name, self.seqDict, self.ksize)))
+##            # Sort based on the sequence for extra reproducibility (e.g. when the order of the input sequences is different)
+##            NBP2seq = dict(sorted(NBP2seq.items(), key = lambda x: (len(x[1]), x[1]), reverse = True)) # Assuming that python dicts preserve insertion ordering, which they should nowadays
+##            NBPs = list(NBP2seq)
 
             # Collect prefixes-suffixes for locating potential overlaps
             start2NBPs = defaultdict(set) # first k nucleotides
             sStart = {}
             sEnd = {}
-            for p, seq in NBP2seq.items():
+            for NBP, seq in NBP2seq.items():
                 start, end = seq[:self.ksize], seq[-self.ksize:]
-                start2NBPs[start].add(p)
-                sStart[p] = start
-                sEnd[p] = end
+                start2NBPs[start].add(NBP)
+                sStart[NBP] = start
+                sEnd[NBP] = end
 
             # Build graph of non-branching paths
             NBPG = Graph()
             NBP2vertex = {}
 
-            for p in NBPs:
-                assert p not in NBP2vertex
-                NBP2vertex[p] = int(NBPG.add_vertex())
-            for p1 in NBPs:
-                for p2 in start2NBPs[sEnd[p1]]:
-                    NBPG.add_edge(NBP2vertex[p1], NBP2vertex[p2])
+            for NBP in NBPs:
+                assert NBP not in NBP2vertex
+                NBP2vertex[NBP] = int(NBPG.add_vertex())
+            for NBP1 in NBPs:
+                for NBP2 in start2NBPs[sEnd[NBP1]]:
+                    NBPG.add_edge(NBP2vertex[NBP1], NBP2vertex[NBP2])
                            
-            vertex2NBP = {v: p for p,v in NBP2vertex.items()}
+            vertex2NBP = {v: NBP for NBP,v in NBP2vertex.items()}
                 
             ### Write component's input sequences, DBG and NBPG
             if False:
@@ -416,17 +420,21 @@ class Assembler:
                     continue
                 # Find reverse complement Non-Branching Paths
                 psets = get_psets(comp2nvs[nc1] | comp2nvs[nc2])
-                assert len(psets) == len(comp2nvs[nc1]) == len(comp2nvs[nc1]) # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
+                assert len(psets) == len(comp2nvs[nc1]) == len(comp2nvs[nc2]) # each sequence path should have a reverse complement equivalent (same vertices in the kmer graph, reverse order)
                 # Count
                 names = list(seqPathsThisComp.keys())
                 stt = threads if len(psets) > threads else 1000000000
-                for spGS in dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsThisComp, psets, NBP2seq, vertex2NBP, self.seqDict, single_thread_threshold = stt))):
+                seqPaths_NBPs = dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsThisComp, psets, NBP2seq, vertex2NBP, self.seqDict)))
+                seqPaths_NBPs = {name: spGSs for name, spGSs in seqPaths_NBPs.items() if spGSs}
+                for spGS in seqPaths_NBPs.values():
                     for nv in spGS:
                         nv2rightOrientation[nv] += 1
-            
+                added.add(nc1)
+                added.add(nc2)
+
 
             # If we didn't find a RC for all components this means that in some case fwd and rev are joined in the same component
-            noRC = {nc for nc in comp2nvs if nc not in rcComps} 
+            noRC = {nc for nc in comp2nvs if nc not in rcComps}
             for nc in noRC: # for each of those evil components...
 
                 # Find reverse complement Non-Branching Paths
@@ -437,11 +445,13 @@ class Assembler:
                     nv2rc[nv1] = nv2
                     nv2rc[nv2] = nv1
                 self.set_vertex_filter(NBPG, comp2nvs[nc])
-                assert {int(nv) for nv in NBPG.vertices()} == comp2nvs[nc] # did we alter nv indices when filtering?
-                assert(len(set(gt.topology.label_components(NBPG, directed = False)[0]))) == 1 # check that this is only one component
 
-                for pset, (nv1, nv2) in psets.items():
-                    assert vertex2NBP[nv1] == vertex2NBP[nv2][::-1]
+                if debug:
+                    assert {int(nv) for nv in NBPG.vertices()} == comp2nvs[nc] # did we alter nv indices when filtering?
+                    assert(len(set(gt.topology.label_components(NBPG, directed = False)[0]))) == 1 # check that this is only one component
+
+                    for pset, (nv1, nv2) in psets.items():
+                        assert vertex2NBP[nv1] == vertex2NBP[nv2][::-1]
 
                 # Map the input sequences to nodes in the sequence graph (in the original orientation of the input sequence)
                 names = list(seqPathsThisComp.keys())
@@ -560,21 +570,19 @@ class Assembler:
                     assert v1 == v2
                     del subcomp2vertex1, subcomp2vertex2
 
+                    for snvs1, snvs2 in combinations(subcomps1.values(), 2):
+                        assert not snvs1 & snvs2 # if they are not RC they should not share any paths
+                    for snvs1, snvs2 in combinations(subcomps2.values(), 2):
+                        assert not snvs1 & snvs2 # if they are not RC they should not share any paths
 
-                for snvs1, snvs2 in combinations(subcomps1.values(), 2):
-                    assert not snvs1 & snvs2 # if they are not RC they should not share any paths
-                for snvs1, snvs2 in combinations(subcomps2.values(), 2):
-                    assert not snvs1 & snvs2 # if they are not RC they should not share any paths
-
-                
-                for snc1, snv1 in subcomps1.items():
-                    for nc2, nvs in comp2nvs.items(): # they should not share any paths with other components in the sequence graph either
-                        if nc2 != nc:
-                            assert not nvs & snv1
-                for snc2, snv2 in subcomps1.items():
-                    for nc2, nvs in comp2nvs.items(): # they should not share any paths with other components in the sequence graph either
-                        if nc2 != nc:
-                            assert not nvs & snv2
+                    for snc1, snv1 in subcomps1.items():
+                        for nc2, nvs in comp2nvs.items(): # they should not share any paths with other components in the sequence graph either
+                            if nc2 != nc:
+                                assert not nvs & snv1
+                    for snc2, snv2 in subcomps1.items():
+                        for nc2, nvs in comp2nvs.items(): # they should not share any paths with other components in the sequence graph either
+                            if nc2 != nc:
+                                assert not nvs & snv2
 
                 NBPG.clear_filters()                
 
@@ -602,46 +610,67 @@ class Assembler:
 
             # For each pair of RC component, we select the component with the most Non-Branching paths in the same orientation as the input sequences
             compS2paths = {}
+            added = set()
             for nc1, nc2 in rcComps.items():
                 if nc1 in added:
                     continue
-                if sum(nv2rightOrientation[nv] for nv in comp2nvs[nc1]) >= sum(nv2rightOrientation[nv] for nv in comp2nvs[nc2]):
+                nvsRight1 = sum(nv2rightOrientation[nv] for nv in comp2nvs[nc1])
+                nvsRight2 = sum(nv2rightOrientation[nv] for nv in comp2nvs[nc2])
+                if nvsRight1 > nvsRight2:
                     fwd = nc1
-                else:
+                elif nvsRight1 < nvsRight2:
                     fwd = nc2
-                compS2paths[currentScaffold] =  {vertex2NBP[nv] for nv in comp2nvs[fwd]}
+                else: # nvsRight1 == nvsRight2; break the tie with ATGs
+                    atg1 = sum(NBP2seq[vertex2NBP[nv]].count('ATG') for nv in comp2nvs[nc1])
+                    atg2 = sum(NBP2seq[vertex2NBP[nv]].count('ATG') for nv in comp2nvs[nc2])
+                    if atg1 > atg2:
+                        fwd = nc1
+                    elif atg1 < atg2:
+                        fwd = nc2
+                    else: # break the tie howewer
+                        ord1 = sum(ord(b) for nv in comp2nvs[nc1] for b in NBP2seq[vertex2NBP[nv]])
+                        ord2 = sum(ord(b) for nv in comp2nvs[nc2] for b in NBP2seq[vertex2NBP[nv]])
+                        fwd = nc1 if ord1 >= ord2 else nc2
+                compS2paths[currentScaffold] =  [vertex2NBP[nv] for nv in comp2nvs[fwd]]
                 added.add(nc1)
                 added.add(nc2)
                 currentScaffold += 1
-                
 
-            # Check that we included all the input vertices
             if debug:
+                # Check that we included all the input vertices
                 vs = {np.uint32(v) for v, c_ in enumerate(self.DBG.vp.comp) if c_ == c}
-                assert set(vs) == {v for p in NBPs for v in p}
-            # Check that no paths appear in two different scaffolds
-            for cs1, cs2 in combinations(compS2paths, 2):
-                assert not compS2paths[cs1] & compS2paths[cs2]
+                assert set(vs) == {v for NBP in NBPs for v in NBP}
+                # Check that no paths appear in two different scaffolds
+                for cs1, cs2 in combinations(compS2paths, 2):
+                    assert not compS2paths[cs1] & compS2paths[cs2]
 
 
             ### Process each scaffold in the sequence graph
+            # First order by length for extra reproducibility
+            compS2length = defaultdict(int)
             for scaffold, NBPs in compS2paths.items():
+                for NBP in NBPs:
+                    seq = NBP2seq[NBP]
+                    if NBPG.get_out_neighbors(NBP2vertex[NBP]).shape[0]:
+                        seq = seq[:-self.ksize] # trim the overlap unless this is a terminal node
+                    compS2length[scaffold] += len(seq)
+            compS2length = dict( sorted(compS2length.items(), key = lambda x: x[1], reverse = True) )
+            compS2paths = {scaffold: compS2paths[scaffold] for scaffold in compS2length}
+
+            # Now go
+            for scaffold, NBPs in compS2paths.items():
+
                 # Test that the scaffolds are really connected
                 NBPG.clear_filters() # NEVER FORGET!!!
-                self.set_vertex_filter(NBPG, {NBP2vertex[p] for p in NBPs})
+                self.set_vertex_filter(NBPG, {NBP2vertex[NBP] for NBP in NBPs})
                 msg = f'\tScaffold {scaffold}, {NBPG.num_vertices()} NBP vertices, {NBPG.num_edges()} NBP edges'
                 print_time(msg, end = '\r')
 
                 if debug:
                     assert len(set(gt.topology.label_components(NBPG, directed = False)[0])) == 1
 
-                # Compute scaffold length and skip if too short
-                scaffoldLen = 0
-                for p in NBPs:
-                    seq = NBP2seq[p]
-                    if NBPG.get_out_neighbors(NBP2vertex[p]).shape[0]:
-                        seq = seq[:-self.ksize] # trim the overlap unless this is a terminal node
-                    scaffoldLen += len(seq)
+                # Skip if too short
+                scaffoldLen = compS2length[scaffold]
                 msg += f', {scaffoldLen} bases'
                 if minlen and scaffoldLen < minlen:
                     msg += ' (< minlen, IGNORED)'
@@ -650,7 +679,7 @@ class Assembler:
 
                 if mincov:
                     # Compute scaffold coverage
-                    scaffoldCov = np.mean(self.multimap(self.get_vertex2originslen, threads, [v for p in NBPs for v in p], seqPathsThisComp, single_thread_threshold = 10000))
+                    scaffoldCov = np.mean(self.multimap(self.get_vertex2originslen, threads, [v for NBP in NBPs for v in NBP], seqPathsThisComp, single_thread_threshold = 10000))
                     msg += f', cov {round(scaffoldCov, 2)}'
                     if mincov and scaffoldCov < mincov:
                         msg += ' (< mincov, IGNORED)'
@@ -668,45 +697,45 @@ class Assembler:
                                                           #  use list instead of set to save memory
                 if bubble_identity_threshold and bubble_identity_threshold < 1:
                     path_limits = defaultdict(list)
-                    for p in NBPs:
-                        path_limits[(p[0], p[-1])].append(p)
-                    for (start, end), ps in path_limits.items():
-                        if len(ps) > 1: # more than one path with similar start and end
-                            bubble_paths_all.extend(ps)
+                    for NBP in NBPs:
+                        path_limits[(NBP[0], NBP[-1])].append(NBP)
+                    for (start, end), nbps in path_limits.items():
+                        if len(nbps) > 1: # more than one path with similar start and end
+                            bubble_paths_all.extend(nbps)
                     if sortBy == 'cov':
                         path2cov = dict(zip(bubble_paths_all, self.multimap(self.get_avgPathCov, threads, bubble_paths_all, seqPathsThisComp)))
                     m1 = 0
-                    for (start, end), ps in path_limits.items():
+                    for (start, end), nbps in path_limits.items():
                         
-                        if len(ps) > 1: # more than one path with similar start and end
+                        if len(nbps) > 1: # more than one path with similar start and end
                             if sortBy == 'length':
-                                ps = sorted(ps, key = lambda x: len(x), reverse = True)
+                                nbps = sorted(nbps, key = lambda x: len(x), reverse = True)
                             elif sortBy == 'cov':
-                                ps = sorted(ps, key = lambda x: path2cov[x], reverse = True)
+                                nbps = sorted(nbps, key = lambda x: path2cov[x], reverse = True)
                             else:
                                 assert False
-                            p1 = ps[0] # the longest / most covered one
-                            s1 = NBP2seq[p1][self.ksize:-self.ksize] # remove the first and last kmer
+                            nbp1 = nbps[0] # the longest / most covered one
+                            s1 = NBP2seq[nbp1][self.ksize:-self.ksize] # remove the first and last kmer
                             ref = Aligner(seq = s1, preset = 'sr', n_threads = 1)
                             newOris = set()
-                            for p2 in ps[1:]:
-                                s2 = NBP2seq[p2][self.ksize:-self.ksize]
+                            for nbp2 in nbps[1:]:
+                                s2 = NBP2seq[nbp2][self.ksize:-self.ksize]
                                 al = list(ref.map(s2)) 
                                 if not al:
                                     continue
                                 mlen = sum(a.mlen for a in al)
                                 if mlen/len(s2) >= bubble_identity_threshold: # note that s2 might be smaller than s1 if sorting by cov, so I should correct this
-                                    bubble_paths.add(p2)  
+                                    bubble_paths.add(nbp2)  
                                     m1 += 1
-                                    newOris.update( {ori for v2 in p2 for ori in self.vertex2origins(v2, seqPathsThisComp)} )
-                            for v1 in p1:
+                                    newOris.update( {ori for v2 in nbp2 for ori in self.vertex2origins(v2, seqPathsThisComp)} )
+                            for v1 in nbp1:
                                 bubble_vertex2origins[v1].extend(newOris) # count vertices in p1 as appearing in all of the origins in the bubble paths that we just discarded
                            
-                    NBPs = [p for p in NBPs if p not in bubble_paths]
+                    NBPs = [NBP for NBP in NBPs if NBP not in bubble_paths]
                     msg += f', removed {m1} bubbles'
                     print_time(msg, end = '\r')
                     NBPG.clear_filters()
-                    self.set_vertex_filter(NBPG, {NBP2vertex[p] for p in NBPs})
+                    self.set_vertex_filter(NBPG, {NBP2vertex[NBP] for NBP in NBPs})
 
                 
 
@@ -721,18 +750,21 @@ class Assembler:
                         if vertex2NBP[nv2] not in bubble_paths:
                             predecessors[p1].append(vertex2NBP[nv2])
                 
-                extenders = {p for p in NBPs if len(successors[p]) <= 1 and (successors[p] or predecessors[p])}
-                extenders = extenders | {p for p in NBPs if len(predecessors[p]) == 1} ### added later, consider removing this line if we start failing assertions
-                joinStarters =  {p for p in extenders if len(predecessors[p]) != 1 or len(successors[list(predecessors[p])[0]]) > 1}
+                extenders = {NBP for NBP in NBPs if len(successors[NBP]) <= 1 and (successors[NBP] or predecessors[NBP])}
+                extenders = extenders | {NBP for NBP in NBPs if len(predecessors[NBP]) == 1} ### added later, consider removing this line if we start failing assertions
+                joinStarters =  {NBP for NBP in extenders if len(predecessors[NBP]) != 1 or len(successors[list(predecessors[NBP])[0]]) > 1}
 
                 if not joinStarters: # Is this a cycle
                     if min(len(ps) for ps in predecessors.values()) == 1: # This does not cover the case in which there is a cycle but also a linear component
                         joinStarters = {list(extenders)[0]}
                 
-                joinExtenders = {p for p in extenders if p not in joinStarters}
+                joinExtenders = {NBP for NBP in extenders if NBP not in joinStarters}
                 assert extenders == joinStarters | joinExtenders
 
-                NBPs = [p for p in NBPs if p not in joinStarters | joinExtenders] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
+
+                NBPs = [NBP for NBP in NBPs if NBP not in joinStarters | joinExtenders] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
+
+
                 newPaths = []
                 
                 visited = set()
@@ -762,30 +794,30 @@ class Assembler:
                             predecessors[succ].append(new_path)
 
                 NBP2seq.update(dict(zip(newPaths, self.multimap(self.reconstruct_sequence, threads, newPaths, self.vertex2coords, self.ref2name, self.seqDict, self.ksize))))
-                        
 
                 assert visited == joinExtenders
 
                 # Update scaffold graph
                 pathSet = set(NBPs)
-                for p, preds in predecessors.items():
-                    predecessors[p] = [pred for pred in preds if pred in pathSet]
-                predecessors = defaultdict(list, [(p, preds) for p, preds in predecessors.items() if p in pathSet])
-                for p, succs in successors.items():
-                    successors[p]   = [succ for succ in succs if succ in pathSet]
-                successors   = defaultdict(list, [(p, succs) for p, succs in successors.items()   if p in pathSet])
+                for NBP, preds in predecessors.items():
+                    predecessors[NBP] = [pred for pred in preds if pred in pathSet]
+                predecessors = defaultdict(list, [(NBP, preds) for NBP, preds in predecessors.items() if NBP in pathSet])
+                for NBP, succs in successors.items():
+                    successors[NBP]   = [succ for succ in succs if succ in pathSet]
+                successors   = defaultdict(list, [(NBP, succs) for NBP, succs in successors.items()   if NBP in pathSet])
 
                     
                 # Check that paths with one predecessor and successor happen only around branching points or in cycles
-                if isCycle:
-                    assert len(NBPs) == 1
-                else:
-                    for p in NBPs:
-                        if len(predecessors[p])==1 and len(successors[p])==1:
-                            pred = predecessors[p][0]
-                            succ = successors[p][0]
-                            assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
-                            assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
+                if debug:
+                    if isCycle:
+                        assert len(NBPs) == 1
+                    else:
+                        for NBP in NBPs:
+                            if len(predecessors[NBP])==1 and len(successors[NBP])==1:
+                                pred = predecessors[NBP][0]
+                                succ = successors[NBP][0]
+                                assert len(successors[pred]) > 1 or len(predecessors[pred]) > 1
+                                assert len(successors[succ]) > 1 or len(predecessors[succ]) > 1
 
                 msg += f', processing {len(NBPs)} non-branching paths'
                 print_time(msg, end = '\r')
@@ -795,74 +827,80 @@ class Assembler:
                 # The idea is to remove also overlaps between two sequences sharing the same predecessor
                 trim_left  = set()
                 keep_right = set()
-                for p in NBPs:
-                    if len(successors[p]) > 1:
-                        for succ in successors[p]:
+                for NBP in NBPs:
+                    if len(successors[NBP]) > 1:
+                        for succ in successors[NBP]:
                             if len(succ) > 1:
                                 trim_left.add(succ)
-                        keep_right.add(p)
-                for p in NBPs:
-                    if not successors[p] or len(p) < 2 or (len(p)<=2 and p in trim_left):
-                        keep_right.add(p)
-                    for succ in successors[p]:
+                        keep_right.add(NBP)
+                for NBP in NBPs:
+                    if not successors[NBP] or len(NBP) < 2 or (len(NBP)<=2 and NBP in trim_left):
+                        keep_right.add(NBP)
+                    for succ in successors[NBP]:
                         if succ in trim_left:
-                            keep_right.add(p)
+                            keep_right.add(NBP)
 
                 trimmedPaths = []
-                for p in NBPs:
-                    tp = tuple(p) # copy
-                    if p not in keep_right:
+                for NBP in NBPs:
+                    tp = tuple(NBP) # copy
+                    if NBP not in keep_right:
                         tp = tp[:-1]
-                    if p in trim_left:
+                    if NBP in trim_left:
                         tp = tp[1:]
                     assert tp
                     trimmedPaths.append(tp)
 
                 if debug:
-                    vs = {v for p in NBPs for v in p}
-                    vst = {v for p in trimmedPaths for v in p}
+                    vs = {v for NBP in NBPs for v in NBP}
+                    vst = {v for NBP in trimmedPaths for v in NBP}
                     assert vs == vst
                 
                 trimmedSeqs = []
-                for p in NBPs:
-                    tseq = NBP2seq[p]
-                    if p not in keep_right:
+                for NBP in NBPs:
+                    tseq = NBP2seq[NBP]
+                    if NBP not in keep_right:
                         tseq = tseq[:-self.ksize]
-                    if p in trim_left:
+                    if NBP in trim_left:
                         tseq = tseq[self.ksize:]
                     trimmedSeqs.append(tseq)
-                
 
                 # Update global results
                     
-                path2id  = {p: (scaffold, i) for i, p in enumerate(NBPs)}
                 ori2covs = self.multimap(self.get_ori2cov, threads, trimmedPaths, seqPathsThisComp, bubble_vertex2origins)
+                avgcovs = [sum(ori2cov.values()) for ori2cov in ori2covs]
                 # Using trimmedPaths/trimmedSeqs: don't take into account overlaps with other paths for mean cov calculation and origin reporting
-                
-                foundOris = set()
 
-                for p, ori2cov, tseq in zip(NBPs, ori2covs, trimmedSeqs):
+                # Sort based on trimmed seq length and cov
+                idx = [i for i, tseq in sorted([(i, tseq) for i, tseq in enumerate(trimmedSeqs)], key = lambda x: (len(x[1]), round(avgcovs[x[0]], 2), x[1]), reverse = True)]
+                NBPs = [NBPs[i] for i in idx]
+                ori2covs = [ori2covs[i] for i in idx]
+                avgcovs = [avgcovs[i] for i in idx]
+                trimmedSeqs = [trimmedSeqs[i] for i in idx]
+                del idx
+
+                path2id  = {NBP: (scaffold, i) for i, NBP in enumerate(NBPs)}
+
+                for NBP, ori2cov, avgcov, tseq in zip(NBPs, ori2covs, avgcovs, trimmedSeqs):
                     if debug:
-                        assert p not in addedPaths
-                    id_ = path2id[p]
+                        assert NBP not in addedPaths
+                    id_ = path2id[NBP]
                     # Even for complete genomes, we can have non-branching paths that belong to the core but don't have full coverage in some sequences
                     # This can happen if there are missing bases at the beginning or end of some of the input sequences (contigs in the original assemblies)
                     # So there is no branching, but some are missing
-                    avgcov = sum(ori2cov.values())
                     goodOris = {ori for ori, cov in ori2cov.items() if cov >= genome_assignment_threshold}
                     goodOris.add( list(sorted(ori2cov, key = lambda ori: ori2cov[ori], reverse = True))[0] ) # add at least the origin with the highest cov
                     goodOris = {ori.split('_Nsplit_')[0] for ori in goodOris}
                     # Go on
                     contigs[id_] = Contig(scaffold   = id_[0],
                                           i          = id_[1],
-                                          seq        = NBP2seq[p],
+                                          seq        = NBP2seq[NBP],
                                           tseq       = tseq,
                                           cov        = avgcov,
                                           origins    = goodOris,
-                                          successors = [path2id[succ] for succ in successors[p]])
+                                          successors = [path2id[succ] for succ in successors[NBP]])
                     
                     if debug:
-                        addedPaths.add(p)
+                        addedPaths.add(NBP)
 
                 msg += ', done'
                 print_time(msg)
