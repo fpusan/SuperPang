@@ -337,9 +337,12 @@ class Assembler:
 
             # Translate NBPs into sequences
             NBP2seq = dict(zip(NBPs, self.multimap(self.reconstruct_sequence, threads, NBPs, self.vertex2coords, self.ref2name, self.seqDict, self.ksize)))
-##            # Sort based on the sequence for extra reproducibility (e.g. when the order of the input sequences is different)
-##            NBP2seq = dict(sorted(NBP2seq.items(), key = lambda x: (len(x[1]), x[1]), reverse = True)) # Assuming that python dicts preserve insertion ordering, which they should nowadays
-##            NBPs = list(NBP2seq)
+            # Sort based on the sequence for extra reproducibility (e.g. when the order of the input sequences is different)
+            # Right now (20 Jul 23) it seems this actually made no difference except for the order in which bubble representatives are selected
+            #  and I modified the bubble sorting code so sorting here makes no difference at all as far as I could test
+            # But it is cheap to do anyways so I'll keep it
+            NBP2seq = dict(sorted(NBP2seq.items(), key = lambda x: (len(x[1]), x[1]), reverse = True)) # Assuming that python dicts preserve insertion ordering, which they should nowadays
+            NBPs = list(NBP2seq)
 
             # Collect prefixes-suffixes for locating potential overlaps
             start2NBPs = defaultdict(set) # first k nucleotides
@@ -505,14 +508,14 @@ class Assembler:
 
                 assert (nvs1 | nvs2) == comp2nvs[nc]
 
-                # Identify subcomponents in nv1
+                # Identify subcomponents in nvs1
                 NBPG.clear_filters()
                 self.set_vertex_filter(NBPG, nvs1)
                 subcomps1 = defaultdict(set)
                 for nv,c in zip(NBPG.vertices(), gt.topology.label_components(NBPG, directed = False)[0]):
                     subcomps1[c].add(nv)
                 NBPG.clear_filters()
-                # Identify subcomponents in nv2
+                # Identify subcomponents in nvs2
                 self.set_vertex_filter(NBPG, nvs2)
                 subcomps2 = defaultdict(set)
                 for nv,c in zip(NBPG.vertices(), gt.topology.label_components(NBPG, directed = False)[0]):
@@ -532,7 +535,8 @@ class Assembler:
                         fwd = subcomps1[snc]
                         rev = {nv2rc[nv] for nv in fwd}
                         combined = combined | fwd | rev
-                
+
+                # We recalculate the components after adding the rev subcomponents
                 subcomps1_corrected = defaultdict(set)
                 subcomps2_corrected = defaultdict(set)
                 self.set_vertex_filter(NBPG, combined)
@@ -570,11 +574,12 @@ class Assembler:
                     assert v1 == v2
                     del subcomp2vertex1, subcomp2vertex2
 
-                    for snvs1, snvs2 in combinations(subcomps1.values(), 2):
-                        assert not snvs1 & snvs2 # if they are not RC they should not share any paths
-                    for snvs1, snvs2 in combinations(subcomps2.values(), 2):
-                        assert not snvs1 & snvs2 # if they are not RC they should not share any paths
-
+                    for snv1, snv2 in combinations(subcomps1.values(), 2):
+                        assert not snv1 & snv2 # if they are not RC they should not share any NBPs or have the same vertices
+                        assert not {v for nv in snv1 for v in vertex2NBP[nv]} == {v for nv in snv2 for v in vertex2NBP[nv]}
+                    for snv1, snv2 in combinations(subcomps2.values(), 2):
+                        assert not snv1 & snv2 # if they are not RC they should not share any NBPs or have the same vertices
+                        assert not {v for nv in snv1 for v in vertex2NBP[nv]} == {v for nv in snv2 for v in vertex2NBP[nv]}
                     for snc1, snv1 in subcomps1.items():
                         for nc2, nvs in comp2nvs.items(): # they should not share any paths with other components in the sequence graph either
                             if nc2 != nc:
@@ -608,7 +613,7 @@ class Assembler:
 
             assert len(rcComps) == len(comp2nvs) # all our components have a rc component, splitting was successful
 
-            # For each pair of RC component, we select the component with the most Non-Branching paths in the same orientation as the input sequences
+            # For each pair of RC components, we select the component with the most Non-Branching paths in the same orientation as the input sequences
             compS2paths = {}
             added = set()
             for nc1, nc2 in rcComps.items():
@@ -708,10 +713,10 @@ class Assembler:
                     for (start, end), nbps in path_limits.items():
                         
                         if len(nbps) > 1: # more than one path with similar start and end
-                            if sortBy == 'length':
-                                nbps = sorted(nbps, key = lambda x: len(x), reverse = True)
+                            if sortBy == 'length': # We will also add the seq itself as a second ordering factor to break ties
+                                nbps = sorted(nbps, key = lambda x: (len(x),      NBP2seq[x]), reverse = True) 
                             elif sortBy == 'cov':
-                                nbps = sorted(nbps, key = lambda x: path2cov[x], reverse = True)
+                                nbps = sorted(nbps, key = lambda x: (path2cov[x], NBP2seq[x]), reverse = True)
                             else:
                                 assert False
                             nbp1 = nbps[0] # the longest / most covered one
@@ -1083,7 +1088,6 @@ class Assembler:
                 for nv in (nv1, nv2):
                     if NBP2seq[vertex2NBP[nv]] in seqDict[name]: # check the string to make sure that we only add nodes from the same orientation
                         spGS.add(nv)
-                        break
         return spGS
 
 
