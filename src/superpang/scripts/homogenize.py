@@ -67,7 +67,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
     seqOrderOriginal = []
     seqs = read_fastq(infastq, ambigs = 'as_Ns')
     seqOrderOriginal = list(seqs.keys()) # trust that dict remembers insertion order
-    sortedSeqs = list(sorted(seqs, key = lambda a: len(seqs[a]), reverse = True))
+    sortedSeqs = list(sorted(seqs, key = lambda a: (len(seqs[a]), seqs[a]), reverse = True))
     lexi = list(sorted((f'{i}' for i in range(len(sortedSeqs))), reverse = True))
     ori2minimap = {name: lexi[i] for i, name in enumerate(sortedSeqs)} # with "--dual=no" minimap2 will skip query-target pairs wherein the query name
     minimap2ori = {mm: name for name, mm in ori2minimap.items()}       #  is lexicographically greater than the target name.
