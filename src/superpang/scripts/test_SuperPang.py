@@ -34,7 +34,7 @@ def main():
        iden = '-i0.95'
 
     args = [sys.executable, superpath,'-f'] + files + ['--assume-complete',
-            iden, '-t12', '--force-overwrite', '-o', output_path, '--minimap2-path', MINIMAP2_PATH,
+            iden, '-t12', '--assume-complete', '--force-overwrite', '-o', output_path, '--minimap2-path', MINIMAP2_PATH,
             '--keep-temporary', '--keep-intermediate', '--debug']
     argss = ' '.join(args)
     print(f'Running SuperPang with command "{argss}"')
