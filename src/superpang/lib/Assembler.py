@@ -388,8 +388,8 @@ class Assembler:
                 """Get a dict with a frozenset of vertices as keys, and the two complementary non-branching paths sharing those vertices as values"""
                 psets = defaultdict(list)
                 for nv in nvs:
-                    pset = hash(frozenset(vertex2NBP[nv]))
-                    psets[pset].append(nv)
+                    pset = frozenset(vertex2NBP[nv]) # Tried to use hash(frozenset(...)) as keys before
+                    psets[pset].append(nv)           #  but led to hash collisions and the assertion below failing
                 for nvs_ in psets.values():
                     assert len(nvs_) == 2
                 return psets
@@ -764,10 +764,10 @@ class Assembler:
                         joinStarters = {list(extenders)[0]}
                 
                 joinExtenders = {NBP for NBP in extenders if NBP not in joinStarters}
-                assert extenders == joinStarters | joinExtenders
+                joinSE = joinStarters | joinExtenders
+                assert extenders == joinSE
 
-
-                NBPs = [NBP for NBP in NBPs if NBP not in joinStarters | joinExtenders] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
+                NBPs = [NBP for NBP in NBPs if NBP not in joinSE] # this also removes some joinStarters that can't be extended (no successors), but we'll add them back in the next bit
 
 
                 newPaths = []
