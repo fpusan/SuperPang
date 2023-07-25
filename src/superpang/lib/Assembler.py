@@ -261,9 +261,10 @@ class Assembler:
         ### Process connected components
         for ic, c in enumerate(comps):
             if False: # _debug CODE: Skip unwanted components
-                TGT_COMP = 8
-                if c + 1 != TGT_COMP:
+                TGT_COMP = 1000
+                if ic + 1 != TGT_COMP:
                     continue
+                print(f'Comp{ic+1}, c={c}')
             vs = np.where(self.DBG.vp.comp.get_array() == np.int16(c))[0]
             print_time(f'Working on comp {ic+1}/{nComps}, {len(vs)} vertices')
 
@@ -414,7 +415,7 @@ class Assembler:
                     rcComps[nc1] = nc2
                     rcComps[nc2] = nc1
                 del v1, v2
-            
+
             # Count how many times each Non-Branching Path is in the same orientation as the input sequences
             nv2rightOrientation = defaultdict(int)
             added = set()
@@ -512,14 +513,14 @@ class Assembler:
                 NBPG.clear_filters()
                 self.set_vertex_filter(NBPG, nvs1)
                 subcomps1 = defaultdict(set)
-                for nv,c in zip(NBPG.vertices(), gt.topology.label_components(NBPG, directed = False)[0]):
-                    subcomps1[c].add(nv)
+                for nv,snc1 in zip(NBPG.vertices(), gt.topology.label_components(NBPG, directed = False)[0]):
+                    subcomps1[snc1].add(nv)
                 NBPG.clear_filters()
                 # Identify subcomponents in nvs2
                 self.set_vertex_filter(NBPG, nvs2)
                 subcomps2 = defaultdict(set)
-                for nv,c in zip(NBPG.vertices(), gt.topology.label_components(NBPG, directed = False)[0]):
-                    subcomps2[c].add(nv)
+                for nv,snc2 in zip(NBPG.vertices(), gt.topology.label_components(NBPG, directed = False)[0]):
+                    subcomps2[snc2].add(nv)
                 NBPG.clear_filters()
                 # Identify RC components
                 assert len(subcomps1) == len(subcomps2)
@@ -540,9 +541,9 @@ class Assembler:
                 subcomps1_corrected = defaultdict(set)
                 subcomps2_corrected = defaultdict(set)
                 self.set_vertex_filter(NBPG, combined)
-                for nv, c  in zip(NBPG.vertices(), gt.topology.label_components(NBPG, directed = False)[0]):
-                    subcomps1_corrected[c].add(nv)
-                    subcomps2_corrected[c].add(nv2rc[nv])
+                for nv, snc  in zip(NBPG.vertices(), gt.topology.label_components(NBPG, directed = False)[0]):
+                    subcomps1_corrected[snc].add(nv)
+                    subcomps2_corrected[snc].add(nv2rc[nv])
 
 
                 # The lines above may make a rev subcomponent may end up being contained in a fwd component
@@ -557,8 +558,8 @@ class Assembler:
                             bad2.add(snc2)
                         elif snv1.issubset(snv2) and not snv2.issubset(snv1):
                             bad1.add(snc1)
-                subcomps1_corrected = {c: nvs for c, nvs in subcomps1_corrected.items() if c not in bad1}
-                subcomps2_corrected = {c: nvs for c, nvs in subcomps2_corrected.items() if c not in bad2}
+                subcomps1_corrected = {snc: nvs for snc, nvs in subcomps1_corrected.items() if snc not in bad1}
+                subcomps2_corrected = {snc: nvs for snc, nvs in subcomps2_corrected.items() if snc not in bad2}
 
                 # Keep going
                 subcomps1 = subcomps1_corrected
@@ -594,12 +595,12 @@ class Assembler:
                 first = True
                 for snv1 in subcomps1.values():
                     v1 = sorted([v for nv in snv1 for v in vertex2NBP[nv]]) # list instead of set to reduce memory usage
+                    i1 = nc if first else len(comp2nvs) # recycle the previous component index for nc1
+                    comp2nvs[i1] = snv1
+                    first = False
                     for snv2 in subcomps2.values():                         #  but ofc it sucks
                         v2 = sorted([v for nv in snv2 for v in vertex2NBP[nv]])
                         if v1 == v2:
-                            i1 = nc if first else len(comp2nvs) # recycle the previous component index for nc1
-                            comp2nvs[i1] = snv1
-                            first = False
                             i2 = len(comp2nvs)
                             comp2nvs[i2] = snv2
                             rcComps[i1] = i2
@@ -643,11 +644,11 @@ class Assembler:
 
             if debug:
                 # Check that we included all the input vertices
-                vs = {np.uint32(v) for v, c_ in enumerate(self.DBG.vp.comp) if c_ == c}
+                vs = np.where(self.DBG.vp.comp.get_array() == np.int16(c))[0]
                 assert set(vs) == {v for NBP in NBPs for v in NBP}
                 # Check that no paths appear in two different scaffolds
                 for cs1, cs2 in combinations(compS2paths, 2):
-                    assert not compS2paths[cs1] & compS2paths[cs2]
+                    assert not set(compS2paths[cs1]) & set(compS2paths[cs2])
 
 
             ### Process each scaffold in the sequence graph
