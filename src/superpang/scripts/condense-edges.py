@@ -13,10 +13,12 @@ from collections import defaultdict
 import graph_tool as gt
 from graph_tool.all import Graph
 
-def main():
+from argparse import ArgumentParser
 
-    infasta, outname, ksize, minlen = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(200)
-##    outinfo = outfasta.rsplit('.',1)[0] + '.info.tsv'
+def main(args):
+
+    minlen = 200
+    header_prefix = '' if not args.header_prefix else f'{args.header_prefix}_'
 
     name2id  = {}
     name2covLen = {}
@@ -24,7 +26,7 @@ def main():
     name2vertex = {}
     vertex2name = {}
 
-    seqs = read_fasta(infasta)
+    seqs = read_fasta(args.edges)
     edges = set()
     nodes = set()
 
@@ -37,9 +39,10 @@ def main():
             succs = succs[0].split(',')
         fields = name.split('_')
         assert name not in name2id
-        id_ = fields[1]
+        id_ = '_'.join(fields[fields.index('EDGE')+1:fields.index('length')]) # make it work regardless of whether we added a prefix or replaced '_' by '-'
+        cov = float(fields[fields.index('cov')+1])
         name2id[name] = id_
-        name2covLen[name] = (float(fields[5]), len(seq), id_) # add id_ to break ties deterministically
+        name2covLen[name] = (cov, len(seq), id_) # add id_ to break ties deterministically
         name2longName[name] = longName
         if name not in name2vertex:
             v = int(GS.add_vertex())
@@ -84,7 +87,7 @@ def main():
 ##                best = (sink, l)
 ##        print(source, best[0], best[1])
 
-    with open(outname + '.info.tsv', 'w') as outfile:
+    with open(args.output_name + '.info.tsv', 'w') as outfile:
         outfile.write('id\tregions\tpath\ttrim\n')
         while True:
             origins = sorted({n for n in name2id if not predecessors[n] and n not in addedNodes}, key = lambda n: name2covLen[n], reverse = True)
@@ -122,35 +125,35 @@ def main():
                         if len(path) == 1:
                             seq = seqs[name2longName[path[0]]]
                             if trim_left:
-                                seq = seq[ksize:]
+                                seq = seq[args.ksize:]
                             if trim_right:
-                                seq = seq[:-ksize]
+                                seq = seq[:-args.ksize]
                         else:
-                            seq = ''.join(seqs[name2longName[n]][:-ksize] for n in path[:-1])
+                            seq = ''.join(seqs[name2longName[n]][:-args.ksize] for n in path[:-1])
                             if trim_right:
-                                seq += seqs[name2longName[path[-1]]][:-ksize]
+                                seq += seqs[name2longName[path[-1]]][:-args.ksize]
                             else:
                                 seq += seqs[name2longName[path[-1]]]
                             if trim_left:
-                                seq = seq[ksize:]
+                                seq = seq[args.ksize:]
 
                         # Go for it
                         if seq:
-                            cid = f'SUPERPANG_{len(newSeqs)}_length={len(seq)}'
+                            cid = f'{header_prefix}SUPERPANG_{len(newSeqs)}_length={len(seq)}'
                             pathsStr = '[{}]'.format(','.join([name2id[n] for n in path]))
                             tagDict0 = defaultdict(set) # zero-indexed
                             pos = 0
                             for i, n in enumerate(path):
-                                tag = name2id[n].split('-')[2]
+                                tag = name2id[n].replace('_','-').split('-')[2]
                                 s = seqs[name2longName[n]] # we don't trim for now
                                 assert tag in ('core', 'aux', 'singleton', 'noinfo')
                                 if i > 0:
-                                    pos -= ksize
+                                    pos -= args.ksize
                                 for _ in range(len(s)):
                                     tagDict0[pos].add(tag)
                                     pos += 1
                             if trim_left:
-                                tagDict0 = {pos: tags for pos, tags in tagDict0.items() if pos >= ksize}
+                                tagDict0 = {pos: tags for pos, tags in tagDict0.items() if pos >= args.ksize}
                             tagDict = {} # one-indexed
                             for i, pos in enumerate(sorted(tagDict0)):
                                 tags = tagDict0[pos]
@@ -162,7 +165,7 @@ def main():
                                     tag = 'singleton'
                                 tagDict[i+1] = tag
                             if trim_right:
-                                tagDict = {pos: tag for pos, tag in tagDict.items() if pos <= len(tagDict) - ksize}
+                                tagDict = {pos: tag for pos, tag in tagDict.items() if pos <= len(tagDict) - args.ksize}
                             assert len(tagDict) == len(seq)
                             last = None
                             lastStart = 0
@@ -175,13 +178,13 @@ def main():
                                         tagsStr.append(f'({lastStart},{pos-1},{last})')
                                         if last == 'core':
                                             coreSeq = seq[lastStart-1:pos-1]
-                                            newCore[f'SUPERPANG_{len(newSeqs)}-core-{coreAdded}_length={len(coreSeq)}'] = coreSeq
+                                            newCore[f'{header_prefix}SUPERPANG_{len(newSeqs)}-core-{coreAdded}_length={len(coreSeq)}'] = coreSeq
                                             coreAdded += 1
                                     lastStart = pos
                                     last = tag
                             if last == 'core':
                                 coreSeq = seq[lastStart-1:pos-1]
-                                newCore[f'SUPERPANG_{len(newSeqs)}-core-{coreAdded}_length={len(coreSeq)}'] = coreSeq
+                                newCore[f'{header_prefix}SUPERPANG_{len(newSeqs)}-core-{coreAdded}_length={len(coreSeq)}'] = coreSeq
                             tagsStr.append(f'({lastStart},{len(tagDict)},{last})')
                             tagsStr = '[{}]'.format(','.join(tagsStr))
                             if not trim_left and not trim_right:
@@ -219,7 +222,7 @@ def main():
 
     assert len(addedNodes) == len(name2id)
 
-    write_fasta(newSeqs, outname + '.fasta')
+    write_fasta(newSeqs, args.output_name + '.fasta')
 ##    write_fasta(newCore, outname + '.core.fasta') # this is somehow not working anymore (has very low completeness), not sure why but we were not using it anyways
 
 
@@ -237,12 +240,11 @@ def G2dicts(GS, name2vertex, vertex2name):
     return predecessors, successors
         
 
-
-
 def set_vertex_filter(GS, vSS, inverted = False):
     for vS in GS.vertices():
         GS.vp.vfilt[vS] = vS in vSS
     GS.set_vertex_filter(GS.vp.vfilt, inverted = inverted)
+    
 
 def set_edge_filter(GS, edges, inverted = False):
     for e in GS.edges():
@@ -250,5 +252,23 @@ def set_edge_filter(GS, edges, inverted = False):
     GS.set_edge_filter(GS.ep.efilt, inverted = inverted)
 
 
+def parse_args():
+    parser = ArgumentParser(description='Create a consensus pangenome assembly from a set of bins/genomes from the same mOTU/species')
+    parser.add_argument('edges', type = str,
+                        help = 'Input fasta file containing the NBP graph edges')
+    parser.add_argument('output_name', type = str,
+                        help = 'Output file name')
+    parser.add_argument('ksize', type = int,
+                        help = 'kmer size')
+    parser.add_argument('-u', '--header-prefix', type = str,
+                        help = 'Prefix to be added to output sequence names')
+    parser.add_argument('--nice-headers', action='store_true',
+                        help = 'Replace dashes with underscores in output sequence names')
+    return parser.parse_args()
+
+ 
+
+
+
 if __name__ == '__main__':
-    main()
+    main(parse_args())

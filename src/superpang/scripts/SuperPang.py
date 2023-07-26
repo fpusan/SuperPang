@@ -235,14 +235,21 @@ def main(args, uuid):
             print('mOTUpan was unable to predict the core genome for this dataset')
             for id_ in contigs:
                 id2tag[id_] = 'noinfo'
-        
+
+
+    ### Header prefix
+    header_prefix = '' if not args.header_prefix else f'{args.header_prefix}_'
+
+
     ### Prepare assembly graph nodes
     assemblyNodes = {}
     assemblyNodesCore = {}
     assemblyNodesAux = {}
     nodeNames = {}
     for id_, contig in contigs.items():
-        nodeNames[id_] = f'NODE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(contig.tseq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]};'
+        nodeNames[id_] = f'{header_prefix}NODE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(contig.tseq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]};'
+        if args.nice_headers:
+            nodeNames[id_] = nodeNames[id_].replace('-', '_')
         if contig.tseq:
             assemblyNodes[nodeNames[id_]] = contig.tseq
             if id2tag[id_] == 'core':
@@ -253,7 +260,9 @@ def main(args, uuid):
     ### Prepare assembly graph edges
     edgeNames = {}
     for id_, contig in contigs.items():
-        edgeNames[id_] = f'EDGE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(contig.seq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]}'
+        edgeNames[id_] = f'{header_prefix}EDGE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(contig.seq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]}'
+        if args.nice_headers:
+            edgeNames[id_] = edgeNames[id_].replace('-', '_')
     assemblyEdges = {}
     for id_, contig in contigs.items():
         succs = ','.join([edgeNames[succ] for succ in contig.successors])
@@ -277,7 +286,10 @@ def main(args, uuid):
 
     ### Condense edges
     print_time('Reconstructing contigs')
-    ecode = call([sys.executable, path + '/' + 'condense-edges.py', outputEdges, outputName, str(args.ksize)])
+    command = [sys.executable, path + '/' + 'condense-edges.py', outputEdges, outputName, str(args.ksize)]
+    if args.header_prefix:
+        command.extend(['--header-prefix', args.header_prefix])
+    ecode = call(command)
     if ecode:
         print('\nThere was an error running condense-edges.py. Please open an issue\n')
         raise ControlledExit
@@ -323,6 +335,8 @@ def parse_args():
                         help = 'Output directory')
     parser.add_argument('-d', '--temp-dir', type = str, default = '/tmp/',
                         help = 'Temp directory')
+    parser.add_argument('-u', '--header-prefix', type = str,
+                        help = 'Prefix to be added to output sequence names')
     parser.add_argument('--assume-complete', action='store_true',
                         help = 'Assume that the input genomes are complete (--genome-assignment-threshold 0.95 --default-completeness 99)')
     parser.add_argument('--lowmem', action='store_true',
@@ -335,6 +349,8 @@ def parse_args():
                         help = 'Keep temporary files')
     parser.add_argument('--verbose-mOTUpan', action='store_true',
                         help = 'Print out mOTUpan logs')
+    parser.add_argument('--nice-headers', action='store_true',
+                        help = 'Replace dashes with underscores in output sequence names')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Write results even if the output directory already exists')
     parser.add_argument('--debug', action='store_true',
@@ -344,6 +360,8 @@ def parse_args():
         args.checkm = None
         args.genome_assignment_threshold = 0.95
         args.default_completeness = 99
+    if args.debug:
+        args.verbose_mOTUpan = True
     return args
 
 
