@@ -140,6 +140,8 @@ def main(args):
                         # Go for it
                         if seq:
                             cid = f'{header_prefix}SUPERPANG_{len(newSeqs)}_length={len(seq)}'
+                            if args.nice_headers:
+                                cid = cid.replace('-','_')
                             pathsStr = '[{}]'.format(','.join([name2id[n] for n in path]))
                             tagDict0 = defaultdict(set) # zero-indexed
                             pos = 0
@@ -223,6 +225,8 @@ def main(args):
     assert len(addedNodes) == len(name2id)
 
     write_fasta(newSeqs, args.output_name + '.fasta')
+##    if args.nice_headers:
+##        newCore = {h.replace('_','-'): s for h, s in newCore.items()}
 ##    write_fasta(newCore, outname + '.core.fasta') # this is somehow not working anymore (has very low completeness), not sure why but we were not using it anyways
 
 
