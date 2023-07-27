@@ -33,6 +33,7 @@ cdef class Compressor:
         cdef const unsigned char [:] tetra
         cdef DTYPE_t [1000] cseq
         cdef int ctetra
+        cdef unsigned int exp # unsigned int to avoid power operation to be casted to a double
         for i in range(self.com):
             # Each tetranucleotide is stored as an 8-bit binary
             # A: 00, C: 01, G: 10, T: 11 
@@ -42,12 +43,16 @@ cdef class Compressor:
                 if tetra[3-j] == b'A':
                     pass
                 elif tetra[3-j] == b'C':
-                    ctetra += 10**(2*j)
+                    exp = (2*j)
+                    ctetra += 10**exp
                 elif tetra[3-j] == b'G':
-                    ctetra += 10**((2*j)+1)
+                    exp = (2*j)+1
+                    ctetra += 10**exp
                 elif tetra[3-j] == b'T':
-                    ctetra += 10**((2*j)+1)
-                    ctetra += 10**(2*j)
+                    exp = (2*j)+1
+                    ctetra += 10**exp
+                    esp = (2*j)
+                    ctetra += 10**exp
             # Transform the 8-bit into a 1-byte decimal
             cseq[i] = self.change_base(ctetra, 2, 10)
         # For the remainder, just store each base as a byte
@@ -61,6 +66,7 @@ cdef class Compressor:
         cdef Py_ssize_t i, j
         cdef int dec
         cdef int ctetra
+        cdef unsigned int exp # unsigned int to avoid power operation to be casted to a double
         seq = array('u', '0'*self.ksize)
         for i in range(self.com):
             dec = cseq[i]
@@ -71,15 +77,19 @@ cdef class Compressor:
                 if ctetra // 10**((2*j)+1):
                     if ( ctetra - 10**((2*j)+1) ) // 10**((2*j)):
                         seq[(i*4)+(3-j)] = 'T'
-                        ctetra -= 10**((2*j)+1)
-                        ctetra -= 10**(2*j)
+                        exp = (2*j)+1
+                        ctetra -= 10**exp
+                        exp = (2*j)
+                        ctetra -= 10**exp
                     else:
                         seq[(i*4)+(3-j)] = 'G'
-                        ctetra -= 10**((2*j)+1)
+                        exp = (2*j)+1
+                        ctetra -= 10**exp
                 else:
                     if ctetra // 10**((2*j)):
                         seq[(i*4)+(3-j)] = 'C'
-                        ctetra -= 10**(2*j)
+                        exp = (2*j)
+                        ctetra -= 10**exp
                     else:
                         seq[(i*4)+(3-j)] = 'A'
 
@@ -93,7 +103,7 @@ cdef class Compressor:
     
     cdef inline int change_base(self, int num, int base0, int base1):
         # This expects 8-bit binary numbers and decimals no larger than 255!
-        cdef Py_ssize_t i
+        cdef unsigned int i # unsigned int to avoid power operation to be casted to a double
         cdef int res = 0
         for i in range(7,-1,-1):
             if num // base1**i:
