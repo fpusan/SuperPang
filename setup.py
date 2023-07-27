@@ -13,7 +13,7 @@ setuptools.setup(
 
 
 # pushing stuff to pip :
-# rm -r build/* dist/* src/SuperPang.egg-info/ src/superpang/lib/superPang/lib/*c
+# rm -r src/build dist src/SuperPang.egg-info src/superpang/lib/*c
 # python3 -m build
 # python3 -m twine upload --repository pypi dist/*tar.gz
-# rm -r build dist src/SuperPang.egg-info src/superPang/lib/*c
+# rm -r src/build dist src/SuperPang.egg-info src/superpang/lib/*c

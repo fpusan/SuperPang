@@ -14,6 +14,9 @@ source:
 
 
 requirements:
+  build:
+    - python=3.8
+    - cython>=3
   host:
     - python=3.8
     - numpy
@@ -34,17 +37,18 @@ requirements:
     - minimap2
     - mappy
 
-build:
+build: # Note that we are hardcoding mOTUlizer and speedict here, which is not great (particularly we need to change the link to speedict if building for a different python version)
   number: 0
   script: "
   {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/39/d0/0bb235071b241f7294bfacc54623a98afddf855ba36807a8dae1717b5694/mOTUlizer-0.2.4.tar.gz --no-deps;
+  {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/75/1a/d22694f7cbcc724e8fb90863d54765bb32723174b6f31053afea5067d706/speedict-0.3.11-cp38-cp38-manylinux_2_28_x86_64.whl;
   {{PYTHON}} -m pip install . -vv;
   "
 
 test:
   imports:
-    - SuperPang
-    - SuperPang.lib
+    - superpang
+    - superpang.lib
 
 about:
   home:  https://github.com/fpusan/SuperPang
