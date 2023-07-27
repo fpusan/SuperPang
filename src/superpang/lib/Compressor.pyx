@@ -2,6 +2,7 @@
 #cython: boundscheck=False
 #cython: wraparound=False
 #cython: cdivision=True
+#cython: cpow=True
 
 from cpython.array cimport array
 import numpy as np
