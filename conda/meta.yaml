@@ -17,6 +17,8 @@ requirements:
   build:
     - python=3.8
     - cython>=3
+    - numpy
+    - gcc
   host:
     - python=3.8
     - numpy

@@ -1,14 +1,16 @@
-from Cython.Build import cythonize
+from setuptools import setup, Extension
+import numpy
 import setuptools
 
-extensions = [setuptools.Extension("superpang.lib.Compressor", sources=["src/superpang/lib/Compressor.pyx"]),
-              setuptools.Extension("superpang.lib.cutils", sources=["src/superpang/lib/cutils.pyx"]),
-              setuptools.Extension("superpang.lib.vtools", sources=["src/superpang/lib/vtools.pyx"])]
+extensions = [Extension("superpang.lib.Compressor", sources=["src/superpang/lib/Compressor.pyx"]),
+              Extension("superpang.lib.cutils", sources=["src/superpang/lib/cutils.pyx"]),
+              Extension("superpang.lib.vtools", sources=["src/superpang/lib/vtools.pyx"])]
 
-setuptools.setup(
-    ext_modules = cythonize(extensions),
-    setup_requires = ['cython'],
-    version = open('src/superpang/VERSION').read().strip()
+setup(
+    setup_requires = ['cython', 'numpy', 'setuptools>=61.0'],
+    ext_modules = extensions,
+    version = open('src/superpang/VERSION').read().strip(),
+    include_dirs = [numpy.get_include()],
     )
 
 
