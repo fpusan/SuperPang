@@ -157,8 +157,8 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
                     assert idlen == idlenPy
                     assert round(iden, 2)  == round(idenPy, 2) or abs(1 - iden/idenPy) < 0.01
                 except:
-                    print(list(cigLengths)[1:10], cigLengthsPy[1:10])
-                    print(list(cigOps)[1:10], cigOpsPy[1:10])
+                    print(list(cigLengths)[:10], cigLengthsPy[:10])
+                    print(list(cigOps)[:10], cigOpsPy[:10])
                     print(idlen, idlenPy)
                     print(sum([L for L, op in zip(cigLengths, cigOps) if op == 61]), sum([L for L, op in zip(cigLengthsPy, cigOpsPy) if op == 61]))
                     print(round(iden, 6), round(idenPy, 6))

@@ -3,7 +3,7 @@
 #cython: wraparound=False
 #cython: cdivision=True
 
-from libc.stdlib cimport malloc, atoi
+from libc.stdlib cimport malloc, strtol
 from cpython.array cimport array, clone
 
 cdef Py_ssize_t MAX_RC_LEN = 50000000
@@ -34,13 +34,16 @@ cpdef parse_cigar(str cigar):
     cdef Py_ssize_t cLen = len(py_bytes)
     cdef char *cigar_src = py_bytes
     cdef char c
-    cdef char [10] buf
+    cdef char [10] buf = [0]*10 # Explicitly initialize to 0.
+                                # Using conda compilers (but not base ubuntu compilers, even when versions were equal)
+                                #  caused trailing characters being passed to strtol in some instances (buf seemed to have more than 10 elements)
+                                #  so if those characters could be parsed as a number, the result from strtol was wront. Initializing to 0 from the starts apparently fixes this
     cdef Py_ssize_t i, j, bsize = 0, nOps = 0, idlen = 0
     cdef float mlen = 0
-    cdef unsigned int [:] Larray
+    cdef long [:] Larray
     cdef char [:] oparray
     cdef double iden
-    Larray  = clone(array('I'), 100000, False)
+    Larray  = clone(array('l'), 100000, False)
     oparray = clone(array('b'), 100000, False)
     for i in range(cLen):
         c = cigar_src[i]
@@ -53,7 +56,7 @@ cpdef parse_cigar(str cigar):
             for j in range(10-bsize):
                 buf[j] = 48 # "0"
             bsize = 0
-            Larray[nOps] = atoi(buf)
+            Larray[nOps] = strtol(buf, NULL, 10)
             oparray[nOps] = c
             if c == 61: # "="
                 mlen  += Larray[nOps]
@@ -68,7 +71,7 @@ cpdef parse_cigar(str cigar):
     return Larray[:nOps], oparray[:nOps], idlen, iden
 
 
-cpdef correct_query(str query, Py_ssize_t queryStart, Py_ssize_t queryEnd, str target, Py_ssize_t targetStart, Py_ssize_t targetEnd, unsigned int [:] cigLengths, char[:] cigOps, bint isRC, int mismatch_size_threshold, int indel_size_threshold):
+cpdef correct_query(str query, Py_ssize_t queryStart, Py_ssize_t queryEnd, str target, Py_ssize_t targetStart, Py_ssize_t targetEnd, long [:] cigLengths, char[:] cigOps, bint isRC, int mismatch_size_threshold, int indel_size_threshold):
   
     query = query if not isRC else reverse_complement(query)
 
