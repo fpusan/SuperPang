@@ -34,10 +34,8 @@ cpdef parse_cigar(str cigar):
     cdef Py_ssize_t cLen = len(py_bytes)
     cdef char *cigar_src = py_bytes
     cdef char c
-    cdef char [10] buf = [0]*10 # Explicitly initialize to 0.
-                                # Using conda compilers (but not base ubuntu compilers, even when versions were equal)
-                                #  caused trailing characters being passed to strtol in some instances (buf seemed to have more than 10 elements)
-                                #  so if those characters could be parsed as a number, the result from strtol was wront. Initializing to 0 from the starts apparently fixes this
+    cdef char [11] buf
+    buf[10] = 0 # We want a 10-element buffer, set the 11th to 0 so strtol knows where to stop
     cdef Py_ssize_t i, j, bsize = 0, nOps = 0, idlen = 0
     cdef float mlen = 0
     cdef long [:] Larray
