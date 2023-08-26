@@ -56,23 +56,24 @@ def main(args, uuid):
 
 
     ### File names
+    file_prefix          = args.output_dir.split('/')[-1] + '.' if args.output_as_file_prefix else ''
     temp_prefix          = f'{args.temp_dir}/{uuid}'
-    corrected_dir        = args.output_dir + '/corrected_input'
-    prelim_dir           = args.output_dir + '/preliminary'
-    temp_saved_dir       = args.output_dir + '/temp'
+    corrected_dir        = args.output_dir +  '/corrected_input'
+    prelim_dir           = args.output_dir +  '/preliminary'
+    temp_saved_dir       = args.output_dir +  '/temp'
     input_combined       = f'{temp_prefix}.combined.fasta'
     input_minimap2       = f'{temp_prefix}.pre.minimap2.fasta'
     diskdb               = f'{temp_prefix}.diskdb' if args.lowmem else None
-    params               = args.output_dir + '/params.tsv'
-    outputPre_kept       = prelim_dir      + '/prelim.fasta'
-    outputPre2origs_kept = prelim_dir      + '/prelim2origins.tsv'
-    name2bin_kept        = prelim_dir      + '/orig2bin.tsv'
-    outputNodes          = args.output_dir + '/NBPs.fasta'
-    outputCore           = args.output_dir + '/NBPs.core.fasta'
-    outputAux            = args.output_dir + '/NBPs.accessory.fasta'
-    outputNode2origs     = args.output_dir + '/NBP2origins.tsv'
-    outputEdges          = args.output_dir + '/graph.fastg'
-    outputName           = args.output_dir + '/assembly'
+    params               = args.output_dir +  '/params.tsv'
+    outputPre_kept       = prelim_dir      +  '/prelim.fasta'
+    outputPre2origs_kept = prelim_dir      +  '/prelim2origins.tsv'
+    name2bin_kept        = prelim_dir      +  '/orig2bin.tsv'
+    outputNodes          = args.output_dir + f'/{file_prefix}NBPs.fasta'
+    outputCore           = args.output_dir + f'/{file_prefix}NBPs.core.fasta'
+    outputAux            = args.output_dir + f'/{file_prefix}NBPs.accessory.fasta'
+    outputNode2origs     = args.output_dir + f'/{file_prefix}NBP2origins.tsv'
+    outputEdges          = args.output_dir + f'/{file_prefix}graph.fastg'
+    outputName           = args.output_dir + f'/{file_prefix}assembly'
 
 
     ### Get sha1 of SuperPang scripts
@@ -351,6 +352,8 @@ def parse_args():
                         help = 'Print out mOTUpan logs')
     parser.add_argument('--nice-headers', action='store_true',
                         help = 'Replace dashes with underscores in output sequence names')
+    parser.add_argument('--output-as-file-prefix', action='store_true',
+                        help = 'Use the output dir name also as a prefix for output file names')
     parser.add_argument('--force-overwrite', action='store_true',
                         help='Write results even if the output directory already exists')
     parser.add_argument('--debug', action='store_true',

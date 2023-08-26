@@ -42,12 +42,16 @@ test-SuperPang.py
 * *-t/--threads*: Number of processors to use. Default `1`.
 * *-o/--output*: Output directory. Default `output`.
 * *-d/--temp-dir*: Directory for temp files. Default `tmp`.
+* *-u/--header-prefix*: Prefix to be added to output sequence names. No prefix is added by default.
 * *--assume-complete*: Assume that the input genomes are complete (*--genome-assignment-threshold 0.95*, *--default-completeness 99*).
 * *--lowmem*: Use disk storages instead of memory when possible, reduces memory usage at the cost of execution time.
 * *--minimap2-path*: Path to the minimap2 executable. Default `minimap2`.
 * *--keep-intermediate*: Keep intermediate files.
 * *--keep-temporary*: Keep temporary files.
 * *--verbose-mOTUpan*: Print out mOTUpan logs.
+* *--nice-headers*: Replace dashes with underscores in output sequence names.
+* *--output-as-file-prefix*: Use the output dir name also as a prefix for output file names.
+* *--force-overwrite*: Write results even if the output directory already exists.
 * *--debug*: Run additional sanity checks (increases execution time).
 
 ## Output
