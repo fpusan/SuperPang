@@ -250,7 +250,7 @@ def main(args, uuid):
     for id_, contig in contigs.items():
         nodeNames[id_] = f'{header_prefix}NODE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(contig.tseq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]};'
         if args.nice_headers:
-            nodeNames[id_] = nodeNames[id_].replace('-', '_')
+            nodeNames[id_] = nodeNames[id_].replace(';','')
         if contig.tseq:
             assemblyNodes[nodeNames[id_]] = contig.tseq
             if id2tag[id_] == 'core':
@@ -263,7 +263,7 @@ def main(args, uuid):
     for id_, contig in contigs.items():
         edgeNames[id_] = f'{header_prefix}EDGE_Sc{contig.scaffold}-{contig.i}-{id2tag[id_]}_length_{len(contig.seq)}_cov_{round(contig.cov,2)}_tag_{id2tag[id_]}'
         if args.nice_headers:
-            edgeNames[id_] = edgeNames[id_].replace('-', '_')
+            pass # we need the semicolon so that Bandage can read this output
     assemblyEdges = {}
     for id_, contig in contigs.items():
         succs = ','.join([edgeNames[succ] for succ in contig.successors])
@@ -351,7 +351,7 @@ def parse_args():
     parser.add_argument('--verbose-mOTUpan', action='store_true',
                         help = 'Print out mOTUpan logs')
     parser.add_argument('--nice-headers', action='store_true',
-                        help = 'Replace dashes with underscores in output sequence names')
+                        help = 'Removes semicolons from non-branching-path names')
     parser.add_argument('--output-as-file-prefix', action='store_true',
                         help = 'Use the output dir name also as a prefix for output file names')
     parser.add_argument('--force-overwrite', action='store_true',

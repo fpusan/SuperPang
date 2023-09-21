@@ -141,7 +141,7 @@ def main(args):
                         if seq:
                             cid = f'{header_prefix}SUPERPANG_{len(newSeqs)}_length={len(seq)}'
                             if args.nice_headers:
-                                cid = cid.replace('-','_')
+                                pass # Nothing to do here for now
                             pathsStr = '[{}]'.format(','.join([name2id[n] for n in path]))
                             tagDict0 = defaultdict(set) # zero-indexed
                             pos = 0
@@ -267,7 +267,7 @@ def parse_args():
     parser.add_argument('-u', '--header-prefix', type = str,
                         help = 'Prefix to be added to output sequence names')
     parser.add_argument('--nice-headers', action='store_true',
-                        help = 'Replace dashes with underscores in output sequence names')
+                        help = 'Not implemented')
     return parser.parse_args()
 
  

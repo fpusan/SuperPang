@@ -49,7 +49,7 @@ test-SuperPang.py
 * *--keep-intermediate*: Keep intermediate files.
 * *--keep-temporary*: Keep temporary files.
 * *--verbose-mOTUpan*: Print out mOTUpan logs.
-* *--nice-headers*: Replace dashes with underscores in output sequence names.
+* *--nice-headers*: Removes semicolons from non-branching-path names.
 * *--output-as-file-prefix*: Use the output dir name also as a prefix for output file names.
 * *--force-overwrite*: Write results even if the output directory already exists.
 * *--debug*: Run additional sanity checks (increases execution time).
