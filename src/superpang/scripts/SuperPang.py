@@ -72,6 +72,7 @@ def main(args, uuid):
     outputCore           = args.output_dir + f'/{file_prefix}NBPs.core.fasta'
     outputAux            = args.output_dir + f'/{file_prefix}NBPs.accessory.fasta'
     outputNode2origs     = args.output_dir + f'/{file_prefix}NBP2origins.tsv'
+    outputEdge2origs     = args.output_dir + f'/{file_prefix}graph.NBP2origins.csv'
     outputEdges          = args.output_dir + f'/{file_prefix}graph.fastg'
     outputName           = args.output_dir + f'/{file_prefix}assembly'
 
@@ -277,13 +278,16 @@ def main(args, uuid):
     write_fasta( assemblyNodesAux,  outputAux   )
     write_fasta( assemblyEdges,     outputEdges )
     
-    with open(outputNode2origs, 'w') as outfile:
+    with open(outputNode2origs, 'w') as outfileN, open(outputEdge2origs, 'w') as outfileE:
+        outfileN.write('Node\tSourceContigs\tSourceGenomes\tNumberOfSourceGenomes\n')
+        outfileE.write('NodeID\tSourceContigs\tSourceGenomes\tNumberOfSourceGenomes\n')
         for id_, contig in contigs.items():
             origs = ','.join(contig.origins)
             bins = [name2bin[name] for name in contig.origins]
             lbins = len(set(bins))
             bins  = ','.join(bins)
-            outfile.write(f'{nodeNames[id_]}\t{origs}\t{bins}\t{lbins}/{len(completeness)}\n')
+            outfileN.write(f'{nodeNames[id_]}\t{origs}\t{bins}\t{lbins}/{len(completeness)}\n')
+            outfileE.write(f'{nodeNames[id_].split("_")[1]}\t{origs}\t{bins}\t{lbins}/{len(completeness)}\n')
 
     ### Condense edges
     print_time('Reconstructing contigs')

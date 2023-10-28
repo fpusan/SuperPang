@@ -60,8 +60,9 @@ test-SuperPang.py
 * `NBPs.fasta`: non-branching paths.
 * `NBPs.core.fasta`: non-branching paths deemed to belong to the core genome of the species by [mOTUpan](https://www.biorxiv.org/content/10.1101/2021.06.25.449606v1).
 * `NBPs.accessory.fasta`: non-branching paths deemed to belong to the accessory genome of the species.
-* `graph.fastg`: assembly graph in a format compatible with [bandage](https://rrwick.github.io/Bandage/).
 * `NBP2origins.tsv`: tab-separated file with the non-branching path IDs, a comma-separated list of the input sequences in which that NBP was deemed present, a comma-separated list of the input genomes in which that NBP was deemed present, and the number of input genomes in which that NBP was deemed present.
+* `graph.fastg`: assembly graph in a format compatible with [bandage](https://rrwick.github.io/Bandage/).
+* `graph.NBP2origins.csv`: file with similar structure as NBP2origins.tsv, formatted for use together with the "Load CSV file" option in Bandage. This allows using the information in the file as node labels in Bandage.
 * `params.tsv`: parameters used in the run.
 
 ## About
