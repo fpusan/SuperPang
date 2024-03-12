@@ -15,6 +15,7 @@ from argparse import ArgumentParser
 from collections import defaultdict
 from subprocess import call, DEVNULL
 import re
+import numpy as np
 
 
 
@@ -63,6 +64,9 @@ def main(args):
 
 #@profile
 def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, correction_tries, identity_threshold, mismatch_size_threshold, indel_size_threshold):
+
+    PY_FALLBACK_CIGAR_PARSING = False
+    PY_FALLBACK_SEQ_CORRECT   = False
 
     seqOrderOriginal = []
     seqs = read_fastq(infastq, ambigs = 'as_Ns')
@@ -148,12 +152,16 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
             isRC = isRC == '-'
             cigar = cigar[5:] #ignore leading cg:Z:
 
-            cigLengths, cigOps, idlen, iden = parse_cigar(cigar)
+            if not PY_FALLBACK_CIGAR_PARSING:
+                cigLengths, cigOps, idlen, iden = parse_cigar(cigar)
+            else:
+                cigLengths, cigOps, idlen, iden = parse_cigar_py(cigar)
+
             if args.debug:
                 cigLengthsPy, cigOpsPy, idlenPy, idenPy = parse_cigar_py(cigar)
                 try:
-                    assert list(cigLengths) == cigLengthsPy
-                    assert list(cigOps) == cigOpsPy
+                    assert list(cigLengths) == list(cigLengthsPy)
+                    assert list(cigOps) == list(cigOpsPy)
                     assert idlen == idlenPy
                     assert round(iden, 2)  == round(idenPy, 2) or abs(1 - iden/idenPy) < 0.01
                 except:
@@ -164,7 +172,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
                     print(round(iden, 6), round(idenPy, 6))
                     raise
             
-            if cigLengths.size == 1 and chr(cigOps[0]) == '=':
+            if cigOps.size == 1 and chr(cigOps[0]) == '=':
                 continue # perfect match, ignore
             
             if iden < identity_threshold:
@@ -210,14 +218,15 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
 
                 # Correct
                 try:
+                    correct_query_fun = correct_query if not PY_FALLBACK_SEQ_CORRECT else correct_query_py
                     correctedSeq = []
                     lastEnd = 0
                     for  queryStart, queryEnd, targetStart, targetEnd, cigLengths, cigOps, isRC, matches, idlen, alignLen in goodOls:
                         correctedSeq.append(seqs[query][lastEnd:queryStart])
-                        correctedSeq.append( correct_query(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
-                                                           cigLengths = cigLengths, cigOps = cigOps, isRC = isRC,
-                                                           mismatch_size_threshold = mismatch_size_threshold,
-                                                           indel_size_threshold = indel_size_threshold)
+                        correctedSeq.append( correct_query_fun(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
+                                                               cigLengths = cigLengths, cigOps = cigOps, isRC = isRC,
+                                                               mismatch_size_threshold = mismatch_size_threshold,
+                                                               indel_size_threshold = indel_size_threshold)
                                            )
                         if args.debug:
                             assert correctedSeq[-1] == correct_query_py(seqs[query], queryStart, queryEnd, seqs[target], targetStart, targetEnd,
@@ -256,8 +265,8 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
 
 def parse_cigar_py(cigar):
     cigar   = re.split('(\d+)',cigar)[1:]
-    Larray  = [int(cigar[i])   for i in range(0, len(cigar), 2)]
-    oparray = [ord(cigar[i+1]) for i in range(0, len(cigar), 2)]
+    Larray  = np.array([int(cigar[i])   for i in range(0, len(cigar), 2)], dtype=np.int_) # equiv to C long
+    oparray = np.array([ord(cigar[i+1]) for i in range(0, len(cigar), 2)], dtype=np.byte) # equiv to C char
     mlen    = sum([L for L, op in zip(Larray, oparray) if op == 61]) # '='
     idlen   = sum([L for L, op in zip(Larray, oparray) if op == 61 or op == 88]) # '=' or 'X'
     iden    = mlen/idlen if idlen else 0
@@ -325,7 +334,7 @@ def correct_query_py(query, queryStart, queryEnd, target, targetStart, targetEnd
 
 
 def parse_args():
-    parser = ArgumentParser(description='Correct a set of sequences using mhap')
+    parser = ArgumentParser(description='Correct a set of sequences using minimap2')
     parser.add_argument('-f', '--fasta', type = str, required = True,
                         help = 'Input fasta')
     parser.add_argument('-i', '--identity_threshold', type = float, default = 0.7,
@@ -347,7 +356,7 @@ def parse_args():
     parser.add_argument('--silent', action = 'store_true',
                         help = 'Ignore stderr from minimus2')
     parser.add_argument('--debug', action = 'store_true',
-                        help = 'Run additional sanity checks (increases execution time)') 
+                        help = 'Run additional sanity checks (increases execution time)')
 
     return parser.parse_args()
 

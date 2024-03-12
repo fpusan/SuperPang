@@ -66,7 +66,7 @@ cpdef parse_cigar(str cigar):
         iden = mlen/idlen
     else:
         iden = 0
-    return Larray[:nOps], oparray[:nOps], idlen, iden
+    return Larray[:nOps].copy(), oparray[:nOps].copy(), idlen, iden
 
 
 cpdef correct_query(str query, Py_ssize_t queryStart, Py_ssize_t queryEnd, str target, Py_ssize_t targetStart, Py_ssize_t targetEnd, long [:] cigLengths, char[:] cigOps, bint isRC, int mismatch_size_threshold, int indel_size_threshold):
