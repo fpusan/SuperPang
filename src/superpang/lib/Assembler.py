@@ -460,14 +460,22 @@ class Assembler:
                         assert vertex2NBP[nv1] == vertex2NBP[nv2][::-1]
 
                 # Map the input sequences to nodes in the sequence graph (in the original orientation of the input sequence)
-                names = list(seqPathsThisComp.keys())
-                seqPaths_NBPs = dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsThisComp, psets, NBP2seq, vertex2NBP, self.seqDict)))
+                seqPathsThisCompN = {name: sp for name, sp in seqPathsThisComp.items() if sp[0][0] in comp2nvs[nc]}
+                names = list(seqPathsThisCompN.keys())
+                seqPaths_NBPs = dict(zip(names, self.multimap(self.get_seqPaths_NBPs, threads, names, seqPathsThisCompN, psets, NBP2seq, vertex2NBP, self.seqDict)))
                 seqPaths_NBPs = {name: spGSs for name, spGSs in seqPaths_NBPs.items() if spGSs}
 
                 # Get the times each node in the sequence graph mapped to an input sequence in the original orientation
                 addedNodes = set()
+                inversions = set()
                 for spGS in seqPaths_NBPs.values():
                     for nv in spGS:
+                        # If an NBP and its RC were present in the same input sequence, mark them as true inversions
+                        #  in this case this is not because two input genomes were sequenced in different orientations
+                        #  but because the fragment is truly present in two orientations in a real genome
+                        #  so we need to include the RC NBP to keep the component connected
+                        if nv2rc[nv] in spGS:
+                            inversions.add(nv)
                         nv2rightOrientation[nv] += 1
                         addedNodes.update( (nv, nv2rc[nv]) )
                     
@@ -502,9 +510,8 @@ class Assembler:
                             best_ol, best_name, best_nvs = rev_ol, name, rev
                     assert best_name
                     addedNames.add(best_name)
-                    best_nvs = {nv for nv in best_nvs if nv2rc[nv] not in nvs1} # don't add reverse complements at this stage
-                                                                                # some are really there and needed to keep everything into a single component
-                                                                                # some will be duplications (e.g. because one of the input genomes has an inverted region)
+                    best_nvs = {nv for nv in best_nvs if nv2rc[nv] not in nvs1}   # don't add reverse complements
+                    best_nvs.update({nv for nv in best_nvs if nv in inversions} ) #  except if we know this nv and its RC appeared together in an input sequence
                     nvs1.update(best_nvs)
 
                 nvs2 = {nv2rc[nv] for nv in nvs1}
@@ -579,10 +586,10 @@ class Assembler:
 
                     for snv1, snv2 in combinations(subcomps1.values(), 2):
                         assert not snv1 & snv2 # if they are not RC they should not share any NBPs or have the same vertices
-                        assert not {v for nv in snv1 for v in vertex2NBP[nv]} == {v for nv in snv2 for v in vertex2NBP[nv]}
+                        assert not {v for nv in snv1 for v in vertex2NBP[nv][1:-1] if len(vertex2NBP) > 2} & {v for nv in snv2 for v in vertex2NBP[nv][1:-1] if len(vertex2NBP) > 2}
                     for snv1, snv2 in combinations(subcomps2.values(), 2):
                         assert not snv1 & snv2 # if they are not RC they should not share any NBPs or have the same vertices
-                        assert not {v for nv in snv1 for v in vertex2NBP[nv]} == {v for nv in snv2 for v in vertex2NBP[nv]}
+                        assert not {v for nv in snv1 for v in vertex2NBP[nv][1:-1] if len(vertex2NBP) > 2} & {v for nv in snv2 for v in vertex2NBP[nv][1:-1] if len(vertex2NBP) > 2}
                     for snc1, snv1 in subcomps1.items():
                         for nc2, nvs in comp2nvs.items(): # they should not share any paths with other components in the sequence graph either
                             if nc2 != nc:
@@ -590,9 +597,7 @@ class Assembler:
                     for snc2, snv2 in subcomps1.items():
                         for nc2, nvs in comp2nvs.items(): # they should not share any paths with other components in the sequence graph either
                             if nc2 != nc:
-                                assert not nvs & snv2
-
-                NBPG.clear_filters()                
+                                assert not nvs & snv2                        
 
                 first = True
                 for snv1 in subcomps1.values():
@@ -663,18 +668,20 @@ class Assembler:
                         seq = seq[:-self.ksize] # trim the overlap unless this is a terminal node
                     compS2length[scaffold] += len(seq)
             compS2length = dict( sorted(compS2length.items(), key = lambda x: x[1], reverse = True) )
-            compS2paths = {scaffold: compS2paths[scaffold] for scaffold in compS2length}
+            scaffolds = list(sorted(compS2length)) # just sort the scaffold ids from this component so we can get the numbers in the right order after ordering by length
+            compS2paths  = {scaffolds[i]: compS2paths [scaffold] for i, scaffold in enumerate(compS2length)}
+            compS2length = {scaffolds[i]: compS2length[scaffold] for i, scaffold in enumerate(compS2length)}
 
             # Now go
             for scaffold, NBPs in compS2paths.items():
 
-                # Test that the scaffolds are really connected
                 NBPG.clear_filters() # NEVER FORGET!!!
                 self.set_vertex_filter(NBPG, {NBP2vertex[NBP] for NBP in NBPs})
                 msg = f'\tScaffold {scaffold}, {NBPG.num_vertices()} NBP vertices, {NBPG.num_edges()} NBP edges'
                 print_time(msg, end = '\r')
 
                 if debug:
+                    # Test that the scaffolds are really connected
                     assert len(set(gt.topology.label_components(NBPG, directed = False)[0])) == 1
 
                 # Skip if too short
