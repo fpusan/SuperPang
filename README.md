@@ -37,13 +37,13 @@ test-SuperPang.py
 * *-l/--minlen*: Scaffold length cutoff. Default `0` (no cutoff).
 * *-c/--mincov*: Scaffold coverage cutoff. Default `0` (no cutoff).
 * *-b/--bubble-identity-threshold*: Minimum identity (matches / length) required to remove a bubble in the sequence graph. Default `0.95`.
-* *-a/--genome-assignment-threshold*. Fraction of shared kmers required to assign a contig to an input genome (0 means a single shared kmer is enough). Default `0.5`.
+* *-a/--genome-assignment-threshold*. Fraction of shared kmers required to assign a contig to an input genome (0 means a single shared kmer is enough) (DEPRECATED).
 * *-x/--default-completeness*: Default genome completeness to assume if a CheckM output is not provided with *--checkm*. Default `70`.
 * *-t/--threads*: Number of processors to use. Default `1`.
 * *-o/--output*: Output directory. Default `output`.
 * *-d/--temp-dir*: Directory for temp files. Default `tmp`.
 * *-u/--header-prefix*: Prefix to be added to output sequence names. No prefix is added by default.
-* *--assume-complete*: Assume that the input genomes are complete (*--genome-assignment-threshold 0.95*, *--default-completeness 99*).
+* *--assume-complete*: Assume that the input genomes are complete (*--default-completeness 99*).
 * *--lowmem*: Use disk storages instead of memory when possible, reduces memory usage at the cost of execution time.
 * *--minimap2-path*: Path to the minimap2 executable. Default `minimap2`.
 * *--keep-intermediate*: Keep intermediate files.

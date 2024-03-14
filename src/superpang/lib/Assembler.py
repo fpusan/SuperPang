@@ -77,11 +77,12 @@ class Assembler:
         Build a De-Bruijn Graph from an input fasta file
         """
 
-        self.ksize        = ksize
-        self.includedSeqs = 0
-        self.seqPaths     = {} # name: compressedVertices
-        self.seqLimits    = set()
-        MAX_KMER_CUTOFF   = 1000000000
+        self.ksize           = ksize
+        self.includedSeqs    = 0
+        self.seqPaths        = {} # name: compressedVertices
+        self.seqLimits       = set()
+        self.seqLimitsPerSeq = {}
+        MAX_KMER_CUTOFF      = 1000000000
 
         ### Read input sequences
         print_time('Reading sequences')
@@ -118,7 +119,6 @@ class Assembler:
         ### Go for the eyes, boo!
         print_time(f'Creating DBG from {len(self.seqDict)} sequences ({nNs} originals)')
         includedSeqs   = 0
-        self.seqLimits = set()
         totalSize      = sum(len(seq) for seq in self.seqDict.values())
         elapsedSize    = 0
         lastSize       = 0
@@ -190,8 +190,10 @@ class Assembler:
                             prev_v, prev_new, past_first = v, newVertex, True
                             if idx == 0:
                                 self.seqLimits.add(v)
+                                self.seqLimitsPerSeq[name] = set([v])
                             if idx == nkmers - 1:
                                 self.seqLimits.add(v)
+                                self.seqLimitsPerSeq[name].add(v)
 
                             elapsedSize += 1
                             
@@ -871,13 +873,19 @@ class Assembler:
                     trimmedSeqs.append(tseq)
 
                 # Update global results
-                    
-                ori2covs = self.multimap(self.get_ori2cov, threads, trimmedPaths, seqPathsThisComp, bubble_vertex2origins)
+                ori2cov_method = 'onevertex'
+                if   ori2cov_method == 'onevertex':
+                    get_ori2cov = self.get_ori2cov_onevertex
+                    genome_assignment_threshold = 1 # ori2cov will be either 1 or 0 with this method
+                elif ori2cov_method == 'seqlimits':
+                    get_ori2cov = self.get_ori2cov_seqlimits
+                else:
+                    get_ori2cov = self.get_ori2cov_raw
+                ori2covs = self.multimap(get_ori2cov, threads, NBPs, seqPathsThisComp, bubble_vertex2origins, self.seqLimitsPerSeq, debug)
                 avgcovs = [sum(ori2cov.values()) for ori2cov in ori2covs]
-                # Using trimmedPaths/trimmedSeqs: don't take into account overlaps with other paths for mean cov calculation and origin reporting
 
-                # Sort based on trimmed seq length and cov
-                idx = [i for i, tseq in sorted([(i, tseq) for i, tseq in enumerate(trimmedSeqs)], key = lambda x: (len(x[1]), round(avgcovs[x[0]], 2), x[1]), reverse = True)]
+                # Sort based on seq length and cov
+                idx = [i for i, seq in sorted([(i, NBP2seq[NBP]) for i, NBP in enumerate(NBPs)], key = lambda x: (len(x[1]), round(avgcovs[x[0]], 2), x[1]), reverse = True)]
                 NBPs = [NBPs[i] for i in idx]
                 ori2covs = [ori2covs[i] for i in idx]
                 avgcovs = [avgcovs[i] for i in idx]
@@ -1071,7 +1079,6 @@ class Assembler:
 
     
     @classmethod
-##    @profile
     def get_seqPaths_NBPs(cls, i):
         """
         Return the vertices in the Sequence Graph that are contained in a given input sequence in its original orientation
@@ -1092,7 +1099,6 @@ class Assembler:
         return spGS
 
 
-
     @classmethod
     def get_avgPathCov(cls, i):
         """
@@ -1103,20 +1109,103 @@ class Assembler:
         return np.mean([len(cls.vertex2origins(v, seqPaths)) for v in path])
 
 
-
     @classmethod
-    def get_ori2cov(cls, i):
+    def get_ori2cov_raw(cls, i):
         """
-        For a given path in the De-Bruijn Graph, calculate the fraction of its vertices that are contained in each input sequence
+        For a given NBP in the De-Bruijn Graph, calculate the fraction of its vertices that are contained in each input sequence
         """
-        NBPs, seqPaths, bubble_vertex2origins = cls.get_multiprocessing_globals()
-        path = NBPs[i]
-        
+        NBPs, seqPaths, bubble_vertex2origins, seqLimitsPerSeq, debug = cls.get_multiprocessing_globals()
+        NBP = NBPs[i]
+        if len(NBP) > 2:
+            NBP = NBP[1:-1] # remove the first and last vertices as they contain the overlaps with other NBPs
+
         ori2cov = defaultdict(int)
-        for v in path:
+        for v in NBP:
             for ori in cls.vertex2origins(v, seqPaths) | set(bubble_vertex2origins[v]): # note how I'm also getting origins not really associated to this path
                 ori2cov[ori] += 1                                                       # but to bubbles that were originally in this path before we popped them
-        return {ori: cov/len(path) for ori, cov in ori2cov.items()}
+        return {ori: cov/len(NBP) for ori, cov in ori2cov.items()}
+
+
+    @classmethod
+    def get_ori2cov_seqlimits(cls, i):
+        """
+        For a given NBP in the De-Bruijn Graph, calculate the fraction of its vertices that are contained in each input sequence
+        This fraction will be normalized by the "mappable length" of each input sequencing (considering whether it begins/ends inside of this NBP)
+        """
+        NBPs, seqPaths, bubble_vertex2origins, seqLimitsPerSeq, debug = cls.get_multiprocessing_globals()
+        NBP = NBPs[i]
+        if len(path) > 2:
+            NBP = NBP[1:-1] # remove the first and last vertices as they contain the overlaps with other NBPs
+
+        ori2idx = {ori: i for i, ori in enumerate(seqPaths)}        
+        NBPcov  = np.zeros( (len(seqPaths), len(NBP)) ) # array with origins in rows and NBP vertices in columns
+                                                         # cell values 0/1 indicate whether a given origin contained a given NBP vertex
+        for j, v in enumerate(NBP):
+            for ori in cls.vertex2origins(v, seqPaths) | set(bubble_vertex2origins[v]): # note how I'm also getting origins not really associated to this path
+                NBPcov[ori2idx[ori],j] = 1                                              # but to bubbles that were originally in this path before we popped them
+                if v in seqLimitsPerSeq[ori]:
+                    NBPcov[ori2idx[ori],j] = 2 # Use 2 if this was the beginning/end of an origin sequence
+
+        ori2cov    = defaultdict(int)
+        ori2maplen = defaultdict(int)
+        for ori, idx in ori2idx.items():
+            ml = 0
+            prevWasMapped = False
+            for x in NBPcov[idx]:
+                if x == 2:
+                    if not prevWasMapped: # start of the origin seq, ignore previous length as it was impossible for the seq to have mapped before
+                        ml = 0
+                    else:                 # end of the origin seq, stop adding length since it is impossible for the seq to keep mapping
+                        break
+                if x > 0:
+                    ori2cov[ori] += 1
+                    prevWasMapped = True
+                else:
+                    prevWasMapped = False
+                ml += 1
+            ori2maplen[ori] = ml
+            
+        
+        return {ori: cov/ori2maplen[ori] for ori, cov in ori2cov.items() if cov}
+
+
+    @classmethod
+    def get_ori2cov_onevertex(cls, i):
+        """
+        For a given NBP in the De-Bruijn Graph, return the input sequences that have at least one vertex contained in it
+        """
+        NBPs, seqPaths, bubble_vertex2origins, seqLimitsPerSeq, debug = cls.get_multiprocessing_globals()
+        NBP = NBPs[i]
+        if debug:
+            assert len(NBP) > 1
+        # Start and end vertices will have overlap with other NBPs
+        # If the NBP has 3 vertices or more then we will remove the first and last vertices, and check over the remaining
+        # As long as an origin shares one vertex with the NBP then it will assume that the NBP was present in that origin
+        # However if the NBP has only 2 vertices we can not trim it
+        #  so in this case we'll ask that both vertices are contained in the origin in order to report it
+        if len(NBP) > 2:
+            NBP = NBP[1:-1] # remove the first and last vertices as they contain the overlaps with other NBPs
+            trimmed = True
+        else:
+            trimmed = False
+
+        ori2cov   = defaultdict(int)
+        addedOris = set()
+
+        for v in NBP:
+            remainingSeqPaths = {ori: sp for ori, sp in seqPaths.items() if ori not in addedOris}
+            for ori in cls.vertex2origins(v, remainingSeqPaths) | set(bubble_vertex2origins[v]) - addedOris: # note how I'm also getting origins not really associated to this path
+                ori2cov[ori] += 1
+                if trimmed: # if we found an ori already we can stop checking for it, but only if this NBP was trimmed
+                    addedOris.add(ori)
+
+        if not trimmed: # ask for all vertices to be covered
+            ori2cov = {ori: cov/len(NBP) for ori, cov in ori2cov.items()}
+        elif debug: # if the path is trimmed every origin should have been included only once (to save time)
+            for cov in ori2cov.values():
+                assert cov == 1
+        
+        return ori2cov
 
 
     @classmethod

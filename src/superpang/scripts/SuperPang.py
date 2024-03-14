@@ -27,7 +27,7 @@ from hashlib import sha1
 from collections import defaultdict
 from subprocess import call, DEVNULL
 from glob import glob
-from argparse import ArgumentParser
+from argparse import ArgumentParser, SUPPRESS
 
 libpath = dirname(realpath(getfile(Assembler)))
 
@@ -205,7 +205,7 @@ def main(args, uuid):
                 origs = ','.join(contig.origins)
                 prelimName = f'PRELIM_Sc{contig.scaffold}-{contig.i}_length_{len(contig.seq)}_cov_{round(contig.cov,2)};'
                 outfile.write(f'{prelimName}\t{origs}\n')
-                prelim[prelimName] = seq
+                prelim[prelimName] = contig.seq
         write_fasta(prelim, outputPre_kept)
 
 
@@ -330,8 +330,8 @@ def parse_args():
                         help = 'Scaffold coverage cutoff')
     parser.add_argument('-b', '--bubble-identity-threshold', type = float, default = 0.95,
                         help = 'Minimum identity (matches / alignment length) required to remove a bubble in the sequence graph')
-    parser.add_argument('-a', '--genome-assignment-threshold', default = 0.5, type = float,
-                        help = 'Fraction of shared kmers required to assign a contig to an input genome')
+    parser.add_argument('-a', '--genome-assignment-threshold', type = float, default=SUPPRESS,
+                        help = 'Fraction of shared kmers required to assign a contig to an input genome (DEPRECATED)')
     parser.add_argument('-x', '--default-completeness', type = float, default = 70,
                         help = 'Default genome completeness to assume if a CheckM output is not provided')
     parser.add_argument('-t', '--threads', type = int, default = 1,
@@ -343,7 +343,7 @@ def parse_args():
     parser.add_argument('-u', '--header-prefix', type = str,
                         help = 'Prefix to be added to output sequence names')
     parser.add_argument('--assume-complete', action='store_true',
-                        help = 'Assume that the input genomes are complete (--genome-assignment-threshold 0.95 --default-completeness 99)')
+                        help = 'Assume that the input genomes are complete (--default-completeness 99)')
     parser.add_argument('--lowmem', action='store_true',
                         help = 'Use disk storages instead of memory when possible, reduces memory usage at the cost of execution time')
     parser.add_argument('--minimap2-path', type = str, default = 'minimap2',
@@ -365,10 +365,14 @@ def parse_args():
     args = parser.parse_args()
     if args.assume_complete:
         args.checkm = None
-        args.genome_assignment_threshold = 0.95
         args.default_completeness = 99
+        args.genome_assignment_threshold = 0.95 # no longer used unless we fall back to old methods of NBP->input_sequence mapping
     if args.debug:
         args.verbose_mOTUpan = True
+    if hasattr(args, 'genome_assignment_threshold') and not args.assume_complete:
+        print('\nDEPRECATION WARNING!!: The use of --genome_assignment_threshold has been deprecated, and modifying it will not affect the results of your run')
+    else:
+        args.genome_assignment_threshold = 1 # just so we can still pass it to Assembler.run even if it's ignored there atm
     return args
 
 
