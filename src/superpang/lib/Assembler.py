@@ -57,14 +57,19 @@ class Assembler:
 
 
     @classmethod
-    def multimap(cls, fun, threads, iterable, *args, single_thread_threshold = 24, imap = False, pool = None):
+    def multimap(cls, fun, threads, iterable, *args, single_thread_threshold = 24, chunksize = None, imap = False, pool = None):
         args = [iterable] + list(args)
         cls.set_multiprocessing_globals(*args)
         if threads == 1 or len(iterable) < single_thread_threshold:
             res = list(map(fun, range(len(iterable))))
         else:
             with Pool(threads) as pool:
-                res = pool.map(fun, range(len(iterable)))
+                if imap:
+                    if not chunksize:
+                        chunksize = 1
+                    res = list(pool.imap(fun, range(len(iterable)), chunksize = chunksize))
+                else:
+                    res = pool.map(fun, range(len(iterable)), chunksize = chunksize)
         cls.clear_multiprocessing_globals()
         return res
     ###############################
@@ -888,10 +893,20 @@ class Assembler:
                     get_ori2cov = self.get_ori2cov_seqlimits
                 else:
                     get_ori2cov = self.get_ori2cov_raw
-                ori2covs = self.multimap(get_ori2cov, threads, NBPs, seqPathsThisComp, bubble_vertex2origins, self.seqLimitsPerSeq, debug)
-                avgcovs = [sum(ori2cov.values()) for ori2cov in ori2covs]
 
-                # Sort based on seq length and cov
+                # Map NBPs to input sequences (origins)
+                # Although NBPs are not strictly sorted by length the first ones tend to be the longest
+                # pool.map splits the input iterable in chunks so the first worker would get the longest NBPs assigned and take 2-3x more time to finish than the rest
+                # To avoid it I sort the NBPs so that each worker gets NBPs of approximately equal length
+                # I also chunksize=10 to dispatch NBPs more sequentially, this comes with some extra IPC overhead but it didn't to have a noticeable impact
+                NBPs = list(sorted(NBPs, key = lambda x: len(x), reverse = True)) # sort by length
+                NBPsX = [[] for i in range(threads)]
+                for i, NBP in enumerate(NBPs):
+                    NBPsX[i%threads].append(NBP) # distribute in chunks
+                NBPs = [NBP for thread in NBPsX for NBP in thread] # flatten
+                ori2covs = self.multimap(get_ori2cov, threads, NBPs, seqPathsThisComp, bubble_vertex2origins, self.seqLimitsPerSeq, debug, chunksize=10)
+                avgcovs = [sum(ori2cov.values()) for ori2cov in ori2covs]
+                # Re-sort based on seq length and cov
                 idx = [i for i, seq in sorted([(i, NBP2seq[NBP]) for i, NBP in enumerate(NBPs)], key = lambda x: (len(x[1]), round(avgcovs[x[0]], 2), x[1]), reverse = True)]
                 NBPs = [NBPs[i] for i in idx]
                 ori2covs = [ori2covs[i] for i in idx]
