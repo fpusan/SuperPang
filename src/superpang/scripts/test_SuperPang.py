@@ -23,10 +23,10 @@ from glob import glob
 def main():
     print(f'\nAssuming that minimap2 can be found in the following path "{MINIMAP2_PATH}". Otherwise edit the MINIMAP2_PATH variable in this script\n')
 
-    if len(sys.argv) > 1 and sys.argv[1] == 'fast':
+    if len(sys.argv) > 1 and sys.argv[1] == 'fast' in sys.argv:
         files = [f'{datapath}/2636415981.fna', f'{datapath}/2636416036.fna']
         iden = '-i1'
-    elif len(sys.argv) > 1 and sys.argv[1] == 'fasth':
+    elif len(sys.argv) > 1 and sys.argv[1] == 'fasth' in sys.argv:
         files = [f'{datapath}/2636415981.fna', f'{datapath}/2636416036.fna']
         iden = '-i0.95'
     else:
@@ -35,7 +35,9 @@ def main():
 
     args = [sys.executable, superpath,'-f'] + files + ['--assume-complete',
             iden, '-t12', '--force-overwrite', '-o', output_path, '--minimap2-path', MINIMAP2_PATH,
-            '--keep-temporary', '--keep-intermediate', '--debug']
+            '--keep-temporary', '--keep-intermediate']
+    if 'nodebug' not in sys.argv:
+        args.append('--debug')
     argss = ' '.join(args)
     print(f'Running SuperPang with command "{argss}"')
     ecode = call(args)
