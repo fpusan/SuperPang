@@ -843,6 +843,19 @@ class Assembler:
                 print_time(msg, end = '\r')
                 
 
+                # Sort NBPs for better load balancing later
+                # Although NBPs are not strictly sorted by length the first ones tend to be the longest
+                # pool.map splits the input iterable in chunks so the first worker would get the longest NBPs assigned and take 2-3x more time to finish than the rest
+                # To avoid it I sort the NBPs so that each worker gets NBPs of approximately equal length
+                # I also chunksize=10 to dispatch NBPs more sequentially, this comes with some extra IPC overhead but it didn't to have a noticeable impact
+                NBPs = list(sorted(NBPs, key = lambda x: len(x), reverse = True)) # sort by length
+                NBPsX = [[] for i in range(threads)]
+                for i, NBP in enumerate(NBPs):
+                    NBPsX[i%threads].append(NBP) # distribute in chunks
+                NBPs = [NBP for thread in NBPsX for NBP in thread] # flatten
+
+                
+                # Trim overlaps
                 # By default we'll trim overlaps at 3', but we make exceptions
                 # The idea is to remove also overlaps between two sequences sharing the same predecessor
                 trim_left  = set()
@@ -884,7 +897,8 @@ class Assembler:
                         tseq = tseq[self.ksize:]
                     trimmedSeqs.append(tseq)
 
-                # Update global results
+
+                # Map NBPs to input sequences (origins)
                 ori2cov_method = 'onevertex'
                 if   ori2cov_method == 'onevertex':
                     get_ori2cov = self.get_ori2cov_onevertex
@@ -894,16 +908,7 @@ class Assembler:
                 else:
                     get_ori2cov = self.get_ori2cov_raw
 
-                # Map NBPs to input sequences (origins)
-                # Although NBPs are not strictly sorted by length the first ones tend to be the longest
-                # pool.map splits the input iterable in chunks so the first worker would get the longest NBPs assigned and take 2-3x more time to finish than the rest
-                # To avoid it I sort the NBPs so that each worker gets NBPs of approximately equal length
-                # I also chunksize=10 to dispatch NBPs more sequentially, this comes with some extra IPC overhead but it didn't to have a noticeable impact
-                NBPs = list(sorted(NBPs, key = lambda x: len(x), reverse = True)) # sort by length
-                NBPsX = [[] for i in range(threads)]
-                for i, NBP in enumerate(NBPs):
-                    NBPsX[i%threads].append(NBP) # distribute in chunks
-                NBPs = [NBP for thread in NBPsX for NBP in thread] # flatten
+                # Chunksize 10 to dispatch NBPs semi-sequentially, but reduce IPC overhead by having some pooling
                 ori2covs = self.multimap(get_ori2cov, threads, NBPs, seqPathsThisComp, bubble_vertex2origins, self.seqLimitsPerSeq, debug, chunksize=10)
                 avgcovs = [sum(ori2cov.values()) for ori2cov in ori2covs]
                 # Re-sort based on seq length and cov
@@ -914,6 +919,9 @@ class Assembler:
                 trimmedSeqs = [trimmedSeqs[i] for i in idx]
                 del idx
 
+
+                
+                # Update global results
                 path2id  = {NBP: (scaffold, i) for i, NBP in enumerate(NBPs)}
 
                 for NBP, ori2cov, avgcov, tseq in zip(NBPs, ori2covs, avgcovs, trimmedSeqs):
