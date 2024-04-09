@@ -77,7 +77,7 @@ class Assembler:
 
 
 ##    @profile
-    def __init__(self, fasta, ksize, threads, diskdb = None, debug = False):
+    def __init__(self, fasta, ksize, threads, diskdb = None, debug = False, gap_size = 1):
         """
         Build a De-Bruijn Graph from an input fasta file
         """
@@ -91,7 +91,7 @@ class Assembler:
 
         ### Read input sequences
         print_time('Reading sequences')
-        self.seqDict = read_fasta(fasta, ambigs = 'as_Ns', Ns = 'split')
+        self.seqDict = read_fasta(fasta, ambigs = 'as_Ns', Ns = 'split', gap_size = gap_size)
         nNs = len({name.split('_Nsplit_')[0] for name in self.seqDict})
         self.ref2name = list(self.seqDict)
         max_kmers = sum(len(seq) - self.ksize + 1 for seq in self.seqDict.values() if len(seq) > self.ksize)

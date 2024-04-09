@@ -197,7 +197,7 @@ def main(args, uuid):
         input_minimap2 = input_combined          
 
     ### Assemble
-    contigs = Assembler(input_minimap2, args.ksize, args.threads, diskdb, args.debug).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads, args.debug)
+    contigs = Assembler(input_minimap2, args.ksize, args.threads, diskdb, args.debug, gap_size = args.gap_size).run(args.minlen, args.mincov, args.bubble_identity_threshold, args.genome_assignment_threshold, args.threads, args.debug)
     if args.keep_intermediate:
         prelim = {}
         with open(outputPre2origs_kept, 'w') as outfile:
@@ -324,6 +324,8 @@ def parse_args():
                         help = 'Minimum iterations for sequence correction')
     parser.add_argument('-k', '--ksize', type = int, default = 301,
                         help = 'Kmer size')
+    parser.add_argument('--gap_size', type = int, default = 1,
+                        help = 'Minimum length of a stretch of "N"s to be considered a scaffolding gap')
     parser.add_argument('-l', '--minlen', type = int, default = 0,
                         help = 'Scaffold length cutoff')
     parser.add_argument('-c', '--mincov', type = float, default = 0,
@@ -362,6 +364,7 @@ def parse_args():
                         help='Write results even if the output directory already exists')
     parser.add_argument('--debug', action='store_true',
                         help = 'Run additional sanity checks (increases execution time)')
+
     args = parser.parse_args()
     if args.assume_complete:
         args.checkm = None
