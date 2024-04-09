@@ -12,7 +12,7 @@ def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore', split_name = True, gap_s
         name, seq = seq.split('\n',1)
         if split_name:
             name = name.split(' ')[0]
-        seq = seq.upper().sub(re_remove, '').replace('U','T')
+        seq = re.sub(re_remove, '', seq).upper().replace('U','T')
         if ambigs == 'as_Ns': # translate the ambiguities
             seq = fix_Ns(seq)
         s = 0
