@@ -324,7 +324,7 @@ def parse_args():
                         help = 'Minimum iterations for sequence correction')
     parser.add_argument('-k', '--ksize', type = int, default = 301,
                         help = 'Kmer size')
-    parser.add_argument('--gap_size', type = int, default = 1,
+    parser.add_argument('--gap-size', type = int, default = 1,
                         help = 'Minimum length of a stretch of "N"s to be considered a scaffolding gap')
     parser.add_argument('-l', '--minlen', type = int, default = 0,
                         help = 'Scaffold length cutoff')
