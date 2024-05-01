@@ -43,7 +43,7 @@ build: # Note that we are hardcoding mOTUlizer and speedict here, which is not g
   number: 0
   script: "
   {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/39/d0/0bb235071b241f7294bfacc54623a98afddf855ba36807a8dae1717b5694/mOTUlizer-0.2.4.tar.gz --no-deps;
-  {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/75/1a/d22694f7cbcc724e8fb90863d54765bb32723174b6f31053afea5067d706/speedict-0.3.11-cp38-cp38-manylinux_2_28_x86_64.whl;
+  {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/b2/6b/3fa0684fd868d586e0819549fededf3f8e554692cadd4cc974b6e187544e/speedict-0.3.12-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl;
   {{PYTHON}} -m pip install . -vv;
   "
 
