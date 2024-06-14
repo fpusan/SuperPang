@@ -4,6 +4,7 @@ import sys
 from os.path import dirname, realpath
 from os import mkdir, remove
 from shutil import rmtree, copy
+from json import dumps
 path = dirname(realpath(__file__))
 if path in sys.path:
     sys.path.remove(path)
@@ -224,8 +225,15 @@ def main(args, uuid):
         featDict = defaultdict(set)
         for name, bin_ in name2bin.items():
             featDict[bin_].update(name2ids[name])
+        completeness = {bin_: completeness[bin_] for bin_ in featDict}
+        if args.keep_intermediate:
+            with open(f'{args.output_dir}/mOTUpan.features.json', 'w') as outfile:
+                outfile.write(dumps({bin_: list(ids) for bin_, ids in featDict.items()}))
+            with open(f'{args.output_dir}/mOTUpan.completeness.json', 'w') as outfile:
+                outfile.write(dumps(completeness))
         
         motu = mOTU( name = "mOTUpan_core_prediction" , faas = {} , cog_dict = featDict, checkm_dict = completeness, max_it = 100, threads = args.threads, precluster = False, method = 'default', quiet = not args.verbose_mOTUpan)
+        print([m.new_completness for m in motu])
         if motu.get_stats()['mOTUpan_core_prediction']['core']:
             for id_ in motu.get_stats()['mOTUpan_core_prediction']['core']:
                 id2tag[id_] = 'core'
@@ -286,8 +294,8 @@ def main(args, uuid):
             bins = [name2bin[name] for name in contig.origins]
             lbins = len(set(bins))
             bins  = ','.join(bins)
-            outfileN.write(f'{nodeNames[id_]}\t{origs}\t{bins}\t{lbins}/{len(completeness)}\n')
-            outfileE.write(f'{nodeNames[id_].split("_")[1]}\t{origs}\t{bins}\t{lbins}/{len(completeness)}\n')
+            outfileN.write(f'{nodeNames[id_]}\t{origs}\t{bins}\t{lbins}/{len(genomes)}\n')
+            outfileE.write(f'{nodeNames[id_].split("_")[1]}\t{origs}\t{bins}\t{lbins}/{len(genomes)}\n')
 
     ### Condense edges
     print_time('Reconstructing contigs')

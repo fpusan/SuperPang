@@ -233,8 +233,11 @@ def main(args):
 def G2dicts(GS, name2vertex, vertex2name):
     predecessors = defaultdict(set)
     successors   = defaultdict(set)
+    vs = set(GS.vertices())
     for n in name2vertex:
         v = name2vertex[n]
+        if v not in vs:
+            continue
         for pv in GS.get_in_neighbors(v):
             if pv != v: # avoid self loops
                 predecessors[n].add(vertex2name[pv])
