@@ -1,32 +1,32 @@
 from datetime import datetime
 import resource
+import re
 
-
-def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore', split_name = True):
+def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore', split_name = True, gap_size = 1):
     assert Ns in ('ignore', 'split')
     assert ambigs in ('ignore', 'as_Ns')
+    gap = 'N' * gap_size
     seqDict = {}
+    re_remove = re.compile(r'[\s.-]+')
     for seq in open(fasta).read().strip().lstrip('>').split('>'):
         name, seq = seq.split('\n',1)
         if split_name:
             name = name.split(' ')[0]
-        seq = seq.upper().replace('\n','').replace('.','').replace('-','').replace('U','A')
-        if ambigs == 'as_Ns': # just translate the
+        seq = re.sub(re_remove, '', seq).upper().replace('U','T')
+        if ambigs == 'as_Ns': # translate the ambiguities
             seq = fix_Ns(seq)
         s = 0
         if name in seqDict:
             raise Exception(f'Sequence "{name}" is duplicated in your input file')
-        if Ns == 'ignore':
+        if Ns == 'ignore' or gap not in seq:
             seqDict[name] = seq
         else:
-            if 'N' not in seq:
-                seqDict[name] = seq
-            else:
-                i = 0
-                for seq in seq.split('N'):
-                    if seq:
-                        seqDict[f'{name}_Nsplit_{i}'] = seq
-                        i += 1
+            i = 0
+            for seq in seq.split(gap):
+                seq = seq.strip('N')
+                if seq:
+                    seqDict[f'{name}_Nsplit_{i}'] = seq
+                    i += 1
     return seqDict
 
 
