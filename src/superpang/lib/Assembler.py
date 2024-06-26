@@ -158,17 +158,27 @@ class Assembler:
                         nkmers = len(seq)-self.ksize+1
                         elapsedSize += len(seq) - nkmers
 
-                        seqMem.buf  [:len(seq)  ] = seq
-                        rcSeqMem.buf[:len(rcSeq)] = rcSeq
+                        # Get a hash key for every kmer in our sequence
+                        if gap_size == 1: # We can assume that there are no Ns in our sequences so we can compress each nucleotide in our kmers into 2-bit words
+                            seqMem.buf  [:len(seq)  ] = seq
+                            rcSeqMem.buf[:len(rcSeq)] = rcSeq
+                            seq2hashes_ = partial(self.seq2hashes, seqlength=len(seq)) # we can't pass seqlength as a global when forking
+                                                                                       #  since it changes for every sequence
+                            pool.map(seq2hashes_, range(nkmers))
+                            # Retrieve the kmer hashes from the memory buffers
+                            # Note the use of a generator expression so that all the hashes are not residing in memory at the same time
+                            #  ... so we can't close the pool until we finish going through such generator expression!
+                            hashes    = (hashMem.buf[i*clength:(i+1)*clength].tobytes() for i in range(nkmers))
 
-                        seq2hashes_ = partial(self.seq2hashes, seqlength=len(seq)) # we can't pass seqlength as a global when forking
-                                                                                   #  since it changes for every sequence
-                        pool.map(seq2hashes_, range(nkmers))
+                        else: # We can not compress our kmers since they may contain Ns, we use the uncompressed kmer strings as hash keys
+                            hashes    = []
+                            for i in range(nkmers):
+                                h = seq[i:i+self.ksize]
+                                ri = len(rcSeq) - i - self.ksize
+                                rh = rcSeq[ri:ri+self.ksize]
+                                h = h if h >= rh else rh
+                                hashes.append(h)
 
-                        # Retrieve the kmer hashes from the memory buffers
-                        # Note the use of a generator expression so that all the hashes are not residing in memory at the same time
-                        #  ... so we can't close the pool until we finish going through such generator expression!
-                        hashes    = (hashMem.buf[i*clength:(i+1)*clength].tobytes() for i in range(nkmers))
                         # Populate the DBG
                         sp = np.empty(nkmers, dtype = np.uint32)
                         prev_v, prev_new, past_first = -1, False, False # store the previous vertex here so we can build (prev, v) edge tuples

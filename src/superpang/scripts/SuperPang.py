@@ -233,7 +233,6 @@ def main(args, uuid):
                 outfile.write(dumps(completeness))
         
         motu = mOTU( name = "mOTUpan_core_prediction" , faas = {} , cog_dict = featDict, checkm_dict = completeness, max_it = 100, threads = args.threads, precluster = False, method = 'default', quiet = not args.verbose_mOTUpan)
-        print([m.new_completness for m in motu])
         if motu.get_stats()['mOTUpan_core_prediction']['core']:
             for id_ in motu.get_stats()['mOTUpan_core_prediction']['core']:
                 id2tag[id_] = 'core'
