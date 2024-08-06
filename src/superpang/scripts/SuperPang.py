@@ -134,9 +134,7 @@ def main(args, uuid):
     for f in genomes:
         bin_ = f.rsplit('/',1)[1].rsplit('.',1)[0] if '/' in f else f.rsplit('.',1)[0]
         for name, seq in read_fasta(f).items():
-            if name in seqDict:
-                #raise Exception(f'Sequence "{name}" is duplicated in your input files')
-                name = bin_ + '_' + name # assume the same name in two files is just a coincidence, and move on
+            name = bin_ + '|' + name
             seqDict[name] = seq
             name2bin[name] = bin_
     write_fasta(seqDict, input_combined)
