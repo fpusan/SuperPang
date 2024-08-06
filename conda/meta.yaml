@@ -15,35 +15,35 @@ source:
 
 requirements:
   build:
-    - python=3.8
+    - python=3.10
     - cython>=3
     - numpy
     - gcc
   host:
-    - python=3.8
+    - python=3.10
     - numpy
     - igraph
     - python-igraph
     - biopython
     - graph-tool
-    - minimap2
+    - minimap2>=2.28
     - mappy
     - cython
   run:
-    - python=3.8
+    - python=3.10
     - numpy
     - igraph
     - python-igraph
     - biopython
     - graph-tool
-    - minimap2
+    - minimap2>=2.28
     - mappy
 
 build: # Note that we are hardcoding mOTUlizer and speedict here, which is not great (particularly we need to change the link to speedict if building for a different python version)
   number: 0
   script: "
   {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/39/d0/0bb235071b241f7294bfacc54623a98afddf855ba36807a8dae1717b5694/mOTUlizer-0.2.4.tar.gz --no-deps;
-  {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/b2/6b/3fa0684fd868d586e0819549fededf3f8e554692cadd4cc974b6e187544e/speedict-0.3.12-cp38-cp38-manylinux_2_17_x86_64.manylinux2014_x86_64.whl;
+  {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/88/bf/cc506602798a6ee578e9ea54b06f12ac01f084be39b0615569447e49673f/speedict-0.3.12-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl;
   {{PYTHON}} -m pip install . -vv;
   "
 

@@ -5,7 +5,7 @@
 _... but note that performance is now better (3x less memory usage, 20% faster execution time) than when we first benchmarked Superpang._
 
 ## Installation
-Requires [graph-tool](https://graph-tool.skewed.de/), [speedict](https://github.com/Congyuwang/RocksDict), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2](https://github.com/lh3/minimap2) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
+Requires [graph-tool](https://graph-tool.skewed.de/), [speedict](https://github.com/Congyuwang/RocksDict), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2 2.28 or higher](https://github.com/lh3/minimap2) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
 ```
 # Install into a new conda environment
 conda create -n SuperPang -c conda-forge -c bioconda -c fpusan superpang

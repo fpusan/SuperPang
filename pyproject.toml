@@ -31,7 +31,7 @@ dependencies = [
   "mOTUlizer==0.2.4",
   "mappy",
   "speedict"
-] # we also need graph-tool but we need conda for that, and minimus2 but it is not a python package
+] # we also need graph-tool but we need conda for that, and minimap2>=2.28 but it is not a python package
 
 
 [project.urls]
