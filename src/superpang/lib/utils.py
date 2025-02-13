@@ -8,7 +8,7 @@ def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore', split_name = True, gap_s
     gap = 'N' * gap_size
     seqDict = {}
     re_remove = re.compile(r'[\s.-]+')
-    for seq in open(fasta).read().strip().lstrip('>').split('>'):
+    for seq in open(fasta).read().strip().lstrip('>').split('\n>'):
         name, seq = seq.split('\n',1)
         if split_name:
             name = name.split(' ')[0]
