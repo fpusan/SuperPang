@@ -14,7 +14,7 @@ def read_fasta(fasta, ambigs = 'ignore', Ns = 'ignore', split_name = True, gap_s
             name = name.split(' ')[0]
         seq = re.sub(re_remove, '', seq).upper().replace('U','T')
         if ambigs == 'as_Ns': # translate the ambiguities
-            seq = fix_Ns(seq)
+            seq = fix_Ns(seq, name)
         s = 0
         if name in seqDict:
             raise Exception(f'Sequence "{name}" is duplicated in your input file')
@@ -38,7 +38,7 @@ def read_fastq(fastq, ambigs = 'ignore'):
             name = infile.readline().strip().lstrip('@')
             seq = infile.readline().strip()
             if ambigs == 'as_Ns':
-                seq = fix_Ns(seq)
+                seq = fix_Ns(seq, name)
             sep = infile.readline().strip()
             qual = infile.readline().strip()
             if not name:
@@ -51,7 +51,7 @@ def read_fastq(fastq, ambigs = 'ignore'):
 
 ambig2N = {ord(a): ord('N') for a in ('R', 'Y', 'K', 'M', 'S', 'W', 'B', 'D', 'H', 'V')} # ord bc str.translate wants ascii codes
 allowedChars = {'A', 'C', 'T', 'G', 'N'}
-def fix_Ns(seq):
+def fix_Ns(seq, name):
     seq = seq.translate(ambig2N)
     if not set(seq).issubset(allowedChars):
         badChars = set(seq) - allowedChars
