@@ -249,14 +249,20 @@ def G2dicts(GS, name2vertex, vertex2name):
 
 def set_vertex_filter(GS, vSS, inverted = False):
     for vS in GS.vertices():
-        GS.vp.vfilt[vS] = vS in vSS
-    GS.set_vertex_filter(GS.vp.vfilt, inverted = inverted)
-    
+        if inverted:
+            GS.vp.vfilt[vS] = vS not in vSS
+        else:
+            GS.vp.vfilt[vS] = vS in vSS
+    GS.set_vertex_filter(GS.vp.vfilt)
+ 
 
 def set_edge_filter(GS, edges, inverted = False):
     for e in GS.edges():
-        GS.ep.efilt[e] = (e.source(), e.target()) in edges
-    GS.set_edge_filter(GS.ep.efilt, inverted = inverted)
+        if inverted:
+            GS.ep.efilt[e] = (e.source(), e.target()) not in edges
+        else:
+            GS.ep.efilt[e] = (e.source(), e.target()) in edges
+    GS.set_edge_filter(GS.ep.efilt)
 
 
 def parse_args():
