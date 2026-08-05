@@ -356,7 +356,7 @@ def parse_args():
                         help = 'Assume that the input genomes are complete (--default-completeness 99)')
     parser.add_argument('--lowmem', action='store_true',
                         help = 'Use disk storages instead of memory when possible, reduces memory usage at the cost of execution time')
-    parser.add_argument('--minimap2-path', type = str, default = 'minimap2',
+    parser.add_argument('--minimap2-path', type = str, default = 'mm2plus',
                         help = 'Path to the minimap2 executable')
     parser.add_argument('--keep-intermediate', action='store_true',
                         help = 'Keep intermediate files')

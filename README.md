@@ -5,7 +5,7 @@
 _... but note that performance is now better (3x less memory usage, 20% faster execution time) than when we first benchmarked Superpang._
 
 ## Installation
-Requires [graph-tool](https://graph-tool.skewed.de/), [speedict](https://github.com/Congyuwang/RocksDict), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2 2.28 or higher](https://github.com/lh3/minimap2) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
+Requires [graph-tool](https://graph-tool.skewed.de/), [speedict](https://github.com/Congyuwang/RocksDict), [mOTUlizer v0.2.4](https://github.com/moritzbuck/mOTUlizer), [minimap2 2.28 or higher](https://github.com/lh3/minimap2)/[mm2plus](https://github.com/at-cg/mm2-plus) and [mappy](https://pypi.org/project/mappy/). The easiest way to get it running is using conda.
 ```
 # Install into a new conda environment
 conda create -n SuperPang -c conda-forge -c bioconda -c fpusan superpang
@@ -45,7 +45,7 @@ test-SuperPang.py
 * *-u/--header-prefix*: Prefix to be added to output sequence names. No prefix is added by default.
 * *--assume-complete*: Assume that the input genomes are complete (*--default-completeness 99*).
 * *--lowmem*: Use disk storages instead of memory when possible, reduces memory usage at the cost of execution time.
-* *--minimap2-path*: Path to the minimap2 executable. Default `minimap2`.
+* *--minimap2-path*: Path to the minimap2 executable. Default `mm2plus`.
 * *--keep-intermediate*: Keep intermediate files.
 * *--keep-temporary*: Keep temporary files.
 * *--skip-mOTUpan*: Skip core genome calculation with mOTUpan.

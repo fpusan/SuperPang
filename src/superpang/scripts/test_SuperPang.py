@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-MINIMAP2_PATH = 'minimap2'
+MINIMAP2_PATH = 'mm2plus'
 
 import sys
 from os.path import dirname, realpath
