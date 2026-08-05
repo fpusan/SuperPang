@@ -209,12 +209,15 @@ def main(args, uuid):
 
 
     ### Tag contigs with mOTUpan
-    print_time('Running mOTUpan')
     id2tag = {}
     if len(set(name2bin.values())) == 1: # only one bin, treat everything as core (we should use a different tag, print a warning and don't output the *.core.fasta
         for id_ in contigs:
             id2tag[id_] = 'core'
+    elif args.skip_mOTUpan:
+        for id_ in contigs:
+            id2tag[id_] = 'noinfo'
     else:
+        print_time('Running mOTUpan')
         # completeness dict for mOTUpan was defined above so that we can identify problems in the beginning
         name2ids = defaultdict(set)
         for id_, contig in contigs.items():
@@ -359,6 +362,8 @@ def parse_args():
                         help = 'Keep intermediate files')
     parser.add_argument('--keep-temporary', action='store_true',
                         help = 'Keep temporary files')
+    parser.add_argument('--skip-mOTUpan', action='store_true',
+                        help = 'Skip core genome calculation with mOTUpan')
     parser.add_argument('--verbose-mOTUpan', action='store_true',
                         help = 'Print out mOTUpan logs')
     parser.add_argument('--nice-headers', action='store_true',

@@ -48,6 +48,7 @@ test-SuperPang.py
 * *--minimap2-path*: Path to the minimap2 executable. Default `minimap2`.
 * *--keep-intermediate*: Keep intermediate files.
 * *--keep-temporary*: Keep temporary files.
+* *--skip-mOTUpan*: Skip core genome calculation with mOTUpan.
 * *--verbose-mOTUpan*: Print out mOTUpan logs.
 * *--nice-headers*: Removes semicolons from non-branching-path names.
 * *--output-as-file-prefix*: Use the output dir name also as a prefix for output file names.
