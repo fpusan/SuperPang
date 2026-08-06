@@ -264,7 +264,7 @@ def iterate(args, rounds, prefix, infastq, outfastq, corrected_previously, corre
 
 
 def parse_cigar_py(cigar):
-    cigar   = re.split('(\d+)',cigar)[1:]
+    cigar   = re.split(r'(\d+)',cigar)[1:]
     Larray  = np.array([int(cigar[i])   for i in range(0, len(cigar), 2)], dtype=np.int_) # equiv to C long
     oparray = np.array([ord(cigar[i+1]) for i in range(0, len(cigar), 2)], dtype=np.byte) # equiv to C char
     mlen    = sum([L for L, op in zip(Larray, oparray) if op == 61]) # '='
