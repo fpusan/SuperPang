@@ -8,3 +8,4 @@ src/superpang/lib/*so
 src/superpang/lib/*html
 src/SuperPang.egg-info
 *swp
+.eggs

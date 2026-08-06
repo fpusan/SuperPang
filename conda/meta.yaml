@@ -12,15 +12,14 @@ source:
   path: ".." 
   version: "{{ version }}"
 
-
 requirements:
   build:
-    - python=3.10
+    - python=3.12
     - cython>=3
     - numpy
     - gcc
   host:
-    - python=3.10
+    - python=3.12
     - numpy
     - igraph
     - python-igraph
@@ -31,7 +30,7 @@ requirements:
     - mm2plus
     - cython
   run:
-    - python=3.10
+    - python=3.12
     - numpy
     - igraph
     - python-igraph
@@ -45,7 +44,7 @@ build: # Note that we are hardcoding mOTUlizer and speedict here, which is not g
   number: 0
   script: "
   {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/39/d0/0bb235071b241f7294bfacc54623a98afddf855ba36807a8dae1717b5694/mOTUlizer-0.2.4.tar.gz --no-deps;
-  {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/88/bf/cc506602798a6ee578e9ea54b06f12ac01f084be39b0615569447e49673f/speedict-0.3.12-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl;
+  {{PYTHON}} -m pip install https://files.pythonhosted.org/packages/5c/3a/8729cac4fac0b3af6e91c5c5a542bfb0268cbdf53d0fe6fde7417b49de6f/speedict-0.3.12-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl;
   {{PYTHON}} -m pip install . -vv;
   "
 
